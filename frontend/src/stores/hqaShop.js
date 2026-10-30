@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { seedCategories, seedProducts, seedSizeChart } from '../data/hqaCatalog'
+import { getProducts } from '../services/api'
 
 const KEY = 'hqa_frontend_demo_v1'
 const clone = (value) => JSON.parse(JSON.stringify(value))
@@ -107,5 +108,35 @@ export const useHqaShopStore = defineStore('hqaShop', {
       this.categories = this.categories.filter(c => c.id !== id); this.save(); return true
     },
     updateSizeChart(rows) { this.sizeChart = clone(rows); this.save() },
+
+    async fetchProducts() {
+      try {
+        const response = await getProducts()
+        const rows = response.data.data
+
+        if (!Array.isArray(rows)) {
+          throw new Error('API không trả về danh sách sản phẩm hợp lệ')
+        }
+
+        // Chuyển dữ liệu từ PostgreSQL sang định dạng
+        // mà giao diện hiện tại đang sử dụng.
+        this.products = rows.map((p) => ({
+          id: String(p.id),
+          name: p.name,
+          categoryId: String(p.categoryId ?? p.category_id ?? ''),
+          price: Number(p.price ?? 0),
+          oldPrice: Number(p.oldPrice ?? p.old_price ?? 0),
+          image: p.image ?? p.image_url ?? '',
+          sizes: Array.isArray(p.sizes) ? p.sizes : [],
+          colors: Array.isArray(p.colors) ? p.colors : [],
+          stock: Number(p.stock ?? 0),
+          featured: Boolean(p.featured),
+          description: p.description ?? '',
+        }))
+      } catch (error) {
+        console.error('Không thể tải sản phẩm:', error)
+        throw error
+      }
+    },
   },
 })

@@ -7,7 +7,7 @@ import {
   ref,
   watch,
 } from "vue";
-import { RouterView } from "vue-router";
+import { RouterView, useRouter, useRoute } from "vue-router";
 import HqaIcon from "../components/common/HqaIcon.vue";
 import {
   demo,
@@ -16,6 +16,8 @@ import {
   showCart,
   showFavorites,
 } from "../stores/hqaDemo";
+const router = useRouter();
+const route = useRoute();
 const searchOpen = ref(false),
   searchText = ref(""),
   menuOpen = ref(false);
@@ -29,12 +31,20 @@ function scrollToSection(id) {
     document.getElementById(id)?.scrollIntoView({ block: "start" }),
   );
 }
+// Nếu đang ở trang khác (tài khoản, đăng nhập...) thì về trang chủ trước, rồi mới chạy việc tiếp theo
+async function goHomeThen(next) {
+  if (route.path !== "/") {
+    await router.push("/");
+    await nextTick();
+  }
+  next?.();
+}
 function searchProducts() {
   demo.query = searchText.value.trim();
   demo.category = "Tất cả";
   demo.tab = "Bán chạy";
   searchOpen.value = false;
-  scrollToSection("products");
+  goHomeThen(() => scrollToSection("products"));
 }
 function subscribe() {
   newsletterStatus.value =
@@ -70,33 +80,49 @@ function handleClick(event) {
     return;
   }
   if (target.dataset.scroll) {
-    scrollToSection(target.dataset.scroll);
+    const id = target.dataset.scroll;
+    goHomeThen(() => scrollToSection(id));
     return;
   }
   if (href === "#home") {
-    window.scrollTo({ top: 0 });
+    goHomeThen(() => window.scrollTo({ top: 0 }));
     return;
   }
   if (href === "#catalog" || href === "#products") {
     demo.category = target.dataset.cat || "Tất cả";
     demo.query = "";
     demo.tab = target.dataset.sale ? "Sale" : "Bán chạy";
-    scrollToSection("products");
+    goHomeThen(() => scrollToSection("products"));
     return;
   }
   if (href === "#cart") {
     showCart();
     return;
   }
+
+  const routes = {
+    "#chat": "/tu-van-size",
+    "#login": "/dang-nhap",
+    "#profile": "/tai-khoan",
+  };
+
+  const route = routes[href];
+
+  if (route) {
+    event.preventDefault();
+    menuOpen.value = false;
+    router.push(route);
+    return;
+  }
+
   const names = {
-    "#chat": "Chatbot tư vấn size",
-    "#login": "Đăng nhập",
     "#profile": "Hồ sơ",
     "#orders": "Đơn hàng",
   };
+
   message(
     names[href] || "Thông tin",
-    "Màn hình này sẽ được triển khai ở bước tiếp theo theo mẫu HQA. Hiện tại chưa kết nối backend.",
+    "Chức năng này hiện chưa được kết nối backend.",
   );
 }
 watch(
@@ -143,6 +169,20 @@ onBeforeUnmount(() => window.removeEventListener("keydown", escape));
             <circle cx="10.5" cy="10.5" r="6.5"></circle>
             <path d="m16 16 5 5"></path>
           </svg></button
+        ><RouterLink
+          aria-label="Trang quản trị"
+          title="Trang quản trị"
+          class="ib desktop-only"
+          to="/admin"
+          style="
+            width: auto;
+            padding: 0 12px;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+          "
+          >Admin</RouterLink
         ><a aria-label="Tài khoản" class="ib desktop-only" href="#login"
           ><svg aria-hidden="true" class="icon" viewbox="0 0 24 24">
             <circle cx="12" cy="7" r="4"></circle>
@@ -178,7 +218,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", escape));
     </div>
     <nav v-if="menuOpen" class="mobile-menu" aria-label="Menu điện thoại">
       <a href="#home">Trang chủ</a><a href="#products">Sản phẩm</a
-      ><a href="#chat">Tư vấn size</a><a href="#login">Tài khoản</a>
+      ><a href="#chat">Tư vấn size</a><a href="#login">Tài khoản</a
+      ><RouterLink to="/admin">Admin</RouterLink>
     </nav>
     <main><RouterView /></main>
     <section class="newsletter">
@@ -224,6 +265,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", escape));
       <div class="row between footer-bottom">
         <small>© 2026 HQA</small
         ><small>Thanh toán: Visa · MoMo · VietQR · COD</small>
+        <RouterLink
+          to="/admin"
+          style="display: inline; font-size: 12px; margin: 0; opacity: 0.7"
+          >Quản trị</RouterLink
+        >
       </div>
     </footer>
     <nav class="bottomnav">
