@@ -1,4 +1,5 @@
 <script setup>
+import { checkAiSize } from '../../services/api'
 import { computed, ref } from 'vue'
 import { useHqaShopStore } from '../../stores/hqaShop'
 import '../../assets/hqa-pages.css'
@@ -13,31 +14,57 @@ const form = ref({ height: '', weight: '', chest: '', waist: '', hip: '' })
 const result = ref(null)
 const error = ref('')
 const hasResult = computed(() => !!result.value)
-function suggest() {
-  error.value = ''; result.value = null
-  const provided = fields.filter(f => form.value[f.key] !== '' && form.value[f.key] !== null)
-  if (!provided.length) { error.value = 'Hãy nhập ít nhất một số đo để nhận gợi ý.'; return }
-  if (provided.some(f => !Number.isFinite(Number(form.value[f.key])) || Number(form.value[f.key]) <= 0)) {
-    error.value = 'Vui lòng nhập số đo là số dương hợp lệ.'; return
+const loading = ref(false)
+
+async function suggest() {
+  error.value = ''
+  result.value = null
+
+  const provided = fields.filter(
+    (f) => form.value[f.key] !== '' &&
+           form.value[f.key] !== null
+  )
+
+  if (!provided.length) {
+    error.value = 'Hãy nhập ít nhất một số đo để nhận gợi ý.'
+    return
   }
-  const allowedSizes = props.product?.sizes || ['S', 'M', 'L', 'XL']
-  const chart = shop.sizeChart.filter(row => allowedSizes.includes(row.size))
-  if (!chart.length) { error.value = 'Sản phẩm này chưa có bảng size tham khảo.'; return }
-  // Khoảng cách chuẩn hóa đến khoảng số đo mẫu; thông số ngực/eo/hông có trọng số cao hơn.
-  const weighted = chart.map(row => {
-    let score = 0
-    const reasons = []
-    for (const { key, label } of provided) {
-      const min = Number(row[`${key}Min`]), max = Number(row[`${key}Max`]), x = Number(form.value[key])
-      const width = Math.max(max - min, 1)
-      const distance = x < min ? (min - x) / width : x > max ? (x - max) / width : 0
-      const weight = ['chest', 'waist', 'hip'].includes(key) ? 2 : 1
-      score += distance * weight
-      if (distance === 0) reasons.push(label.replace(/ \(.+\)/, '').toLowerCase())
+
+  if (provided.some(
+    (f) => !Number.isFinite(Number(form.value[f.key])) ||
+           Number(form.value[f.key]) <= 0
+  )) {
+    error.value = 'Vui lòng nhập số đo là số dương hợp lệ.'
+    return
+  }
+
+  loading.value = true
+
+  try {
+    const payload = Object.fromEntries(
+      provided.map((f) => [
+        f.key,
+        Number(form.value[f.key]),
+      ])
+    )
+
+    const response = await checkAiSize(payload)
+
+    if (!response.data.success) {
+      throw new Error(response.data.message || 'Không thể tư vấn size.')
     }
-    return { size: row.size, score, reasons }
-  }).sort((a, b) => a.score - b.score)
-  result.value = weighted[0]
+
+    result.value = {
+      size: response.data.recommended_size,
+      reasons: [],
+    }
+  } catch (err) {
+    error.value =
+      err.response?.data?.message ||
+      'Không thể kết nối dịch vụ tư vấn size.'
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 <template>

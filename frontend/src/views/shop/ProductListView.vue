@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useHqaShopStore } from '../../stores/hqaShop'
 import HqaProductCard from '../../components/shop/HqaProductCard.vue'
@@ -16,6 +16,21 @@ const filtered = computed(() => {
   else if (sort.value === 'price-desc') list = [...list].sort((a,b) => b.price-a.price)
   else if (sort.value === 'name') list = [...list].sort((a,b) => a.name.localeCompare(b.name, 'vi'))
   return list
+})
+const loading = ref(false)
+const apiError = ref('')
+
+onMounted(async () => {
+  loading.value = true
+  apiError.value = ''
+
+  try {
+    await shop.fetchProducts()
+  } catch {
+    apiError.value = 'Không thể tải sản phẩm. Vui lòng thử lại.'
+  } finally {
+    loading.value = false
+  }
 })
 </script>
 <template>
