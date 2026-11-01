@@ -127,4 +127,67 @@ router.get('/me', requireAuth, async (req, res) => {
   }
 });
 
+// PUT /api/auth/profile (cần token) - cập nhật họ tên, số điện thoại của chính mình
+router.put('/profile', requireAuth, async (req, res) => {
+  const full_name = String(req.body.full_name || '').trim();
+  const phone = String(req.body.phone || '').replace(/\s/g, '');
+
+  if (full_name.length < 2) {
+    return res.status(400).json({ success: false, message: 'Họ tên phải có ít nhất 2 ký tự!' });
+  }
+  if (phone && !/^0\d{9}$/.test(phone)) {
+    return res.status(400).json({ success: false, message: 'Số điện thoại phải gồm 10 chữ số và bắt đầu bằng 0!' });
+  }
+
+  try {
+    // Chỉ sửa tài khoản của người đang đăng nhập (id lấy từ token, không nhận từ client)
+    const result = await db.query(
+      `UPDATE users SET full_name = $1, phone = $2
+       WHERE id = $3
+       RETURNING id, full_name, email, phone, role`,
+      [full_name, phone || null, req.user.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Tài khoản không còn tồn tại!' });
+    }
+    res.json({ success: true, message: 'Cập nhật thông tin thành công!', user: publicUser(result.rows[0]) });
+  } catch (error) {
+    console.error('Lỗi cập nhật hồ sơ:', error.message);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+});
+
+// PUT /api/auth/password (cần token) - đổi mật khẩu
+router.put('/password', requireAuth, async (req, res) => {
+  const current_password = req.body.current_password || '';
+  const new_password = req.body.new_password || '';
+
+  if (!current_password || !new_password) {
+    return res.status(400).json({ success: false, message: 'Vui lòng nhập mật khẩu hiện tại và mật khẩu mới!' });
+  }
+  if (new_password.length < 6) {
+    return res.status(400).json({ success: false, message: 'Mật khẩu mới phải có ít nhất 6 ký tự!' });
+  }
+
+  try {
+    const result = await db.query('SELECT id, password_hash FROM users WHERE id = $1', [req.user.id]);
+    const user = result.rows[0];
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Tài khoản không còn tồn tại!' });
+    }
+
+    const match = await bcrypt.compare(current_password, user.password_hash);
+    if (!match) {
+      return res.status(400).json({ success: false, message: 'Mật khẩu hiện tại không đúng!' });
+    }
+
+    const password_hash = await bcrypt.hash(new_password, SALT_ROUNDS);
+    await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [password_hash, user.id]);
+    res.json({ success: true, message: 'Đổi mật khẩu thành công!' });
+  } catch (error) {
+    console.error('Lỗi đổi mật khẩu:', error.message);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+});
+
 module.exports = router;

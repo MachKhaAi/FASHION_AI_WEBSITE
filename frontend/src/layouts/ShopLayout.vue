@@ -9,6 +9,7 @@ import {
 } from "vue";
 import { RouterView, useRouter, useRoute } from "vue-router";
 import HqaIcon from "../components/common/HqaIcon.vue";
+import { useAdminAuthStore } from "../stores/adminAuth";
 import {
   demo,
   message,
@@ -18,6 +19,7 @@ import {
 } from "../stores/hqaDemo";
 const router = useRouter();
 const route = useRoute();
+const admin = useAdminAuthStore();
 const searchOpen = ref(false),
   searchText = ref(""),
   menuOpen = ref(false);
@@ -26,6 +28,14 @@ const newsletterStatus = ref("Chúng mình không gửi spam. Hủy bất cứ l
 const cartCount = computed(() =>
   demo.cart.reduce((sum, item) => sum + item.qty, 0),
 );
+// Kiểm tra khách đã đăng nhập chưa (đọc token đã lưu trong trình duyệt)
+function hasUserToken() {
+  try {
+    return !!localStorage.getItem("hqa_user_token");
+  } catch {
+    return false;
+  }
+}
 function scrollToSection(id) {
   nextTick(() =>
     document.getElementById(id)?.scrollIntoView({ block: "start" }),
@@ -100,10 +110,10 @@ function handleClick(event) {
     return;
   }
 
-  const routes = {
+    const routes = {
     "#chat": "/tu-van-size",
-    "#login": "/dang-nhap",
-    "#profile": "/tai-khoan",
+    "#login": hasUserToken() ? "/thong-tin-ca-nhan" : "/dang-nhap",
+    "#profile": "/thong-tin-ca-nhan",
   };
 
   const route = routes[href];
@@ -141,6 +151,7 @@ function escape(event) {
 }
 onMounted(() => {
   document.title = "HQA · Trang chủ";
+  admin.restore(); // kiểm tra xem có đang đăng nhập admin không
   window.addEventListener("keydown", escape);
 });
 onBeforeUnmount(() => window.removeEventListener("keydown", escape));
@@ -170,10 +181,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", escape));
             <path d="m16 16 5 5"></path>
           </svg></button
         ><RouterLink
+          v-if="admin.isAuthenticated"
           aria-label="Trang quản trị"
           title="Trang quản trị"
           class="ib desktop-only"
           to="/admin"
+          
           style="
             width: auto;
             padding: 0 12px;
@@ -219,7 +232,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", escape));
     <nav v-if="menuOpen" class="mobile-menu" aria-label="Menu điện thoại">
       <a href="#home">Trang chủ</a><a href="#products">Sản phẩm</a
       ><a href="#chat">Tư vấn size</a><a href="#login">Tài khoản</a
-      ><RouterLink to="/admin">Admin</RouterLink>
+      ><RouterLink v-if="admin.isAuthenticated" to="/admin" target="_blank"
+        >Admin</RouterLink
+      >
     </nav>
     <main><RouterView /></main>
     <section class="newsletter">
@@ -266,7 +281,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", escape));
         <small>© 2026 HQA</small
         ><small>Thanh toán: Visa · MoMo · VietQR · COD</small>
         <RouterLink
+          v-if="admin.isAuthenticated"
           to="/admin"
+          target="_blank"
           style="display: inline; font-size: 12px; margin: 0; opacity: 0.7"
           >Quản trị</RouterLink
         >

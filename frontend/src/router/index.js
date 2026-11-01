@@ -11,6 +11,7 @@ import SizeAdvisorView from "../views/shop/SizeAdvisorView.vue";
 import LoginView from "../views/auth/LoginView.vue";
 import RegisterView from "../views/auth/RegisterView.vue";
 import ProfileView from "../views/customer/ProfileView.vue";
+import AccountInfoView from "../views/customer/AccountInfoView.vue";
 import AdminLoginView from "../views/admin/AdminLoginView.vue";
 import AdminDashboardView from "../views/admin/AdminDashboardView.vue";
 import AdminProductView from "../views/admin/AdminProductView.vue";
@@ -37,6 +38,7 @@ const router = createRouter({
         { path: "dang-nhap", name: "login", component: LoginView },
         { path: "dang-ky", name: "register", component: RegisterView },
         { path: "tai-khoan", name: "hqa-profile", component: ProfileView },
+        { path: "thong-tin-ca-nhan", name: "hqa-account-info", component: AccountInfoView },
       ],
     },
 
