@@ -36,7 +36,7 @@ async function submit() {
       phone: user.phone || form.value.phone,
     })
 
-    await router.push('/tai-khoan')
+    await router.push('/thong-tin-ca-nhan')
   } catch (err) {
     error.value =
       err.response?.data?.message ||
