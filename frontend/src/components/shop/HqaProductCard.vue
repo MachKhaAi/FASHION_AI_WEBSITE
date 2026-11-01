@@ -5,7 +5,7 @@ import { money } from '../../data/hqaCatalog'
 import '../../assets/hqa-pages.css'
 const props = defineProps({ product: { type: Object, required: true } })
 const shop = useHqaShopStore()
-const categoryName = computed(() => shop.categories.find(x => x.id === props.product.categoryId)?.name || 'Thời trang')
+const categoryName = computed(() => props.product.categoryName || shop.categories.find(x => x.id === props.product.categoryId)?.name || 'Thời trang')
 const discount = computed(() => props.product.oldPrice > props.product.price ? Math.round((props.product.oldPrice - props.product.price) / props.product.oldPrice * 100) : 0)
 </script>
 <template>

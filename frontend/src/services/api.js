@@ -48,7 +48,21 @@ API.interceptors.response.use((response) => {
   return response
 })
 
-export const getProducts = () => API.get('/products')
+// ---------- Sản phẩm ----------
+// params: { q, category, minPrice, maxPrice, size ("S,M"), sort }
+export const getProducts = (params) => API.get('/products', { params })
+
+export const getProductById = (id) =>
+  API.get(`/products/${encodeURIComponent(id)}`)
+
+// Bảng kích thước ứng với các size mà sản phẩm đang bán
+export const getProductSizeChart = (id) =>
+  API.get(`/products/${encodeURIComponent(id)}/size-chart`)
+
+// Danh mục, các size, khoảng giá: dùng để dựng bộ lọc
+export const getProductFilters = () => API.get('/products/filters')
+
+export const getCategories = () => API.get('/categories')
 
 export const loginUser = (credentials) =>
   API.post('/login', credentials)

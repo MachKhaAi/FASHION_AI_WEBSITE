@@ -1186,3 +1186,89 @@
         font-size: 30px
     }
 }
+
+/* ===== Bộ lọc nâng cao (giá, kích thước) ===== */
+.hqa-filter-extra {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 32px;
+    padding-top: 14px;
+    border-top: 1px dashed #efdfe0
+}
+
+.hqa-filter-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 9px 10px
+}
+
+.hqa-filter-label {
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #8d6a72
+}
+
+.hqa-chip-sm {
+    padding: 6px 13px;
+    font-size: 12px
+}
+
+.hqa-price-range {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: #a58b90
+}
+
+.hqa-price-range input {
+    width: 112px
+}
+
+.hqa-clear-filter {
+    margin-left: 12px
+}
+
+.hqa-product-grid.hqa-is-loading {
+    opacity: .55;
+    transition: opacity .15s
+}
+
+/* Size / màu không còn hàng */
+.hqa-swatch.is-out {
+    color: #b9a5a9;
+    background: #faf5f5;
+    text-decoration: line-through
+}
+
+.hqa-swatch.is-out.selected {
+    text-decoration: line-through;
+    color: #a8798a
+}
+
+/* Dòng size đang chọn trong bảng kích thước */
+.hqa-chart-table tr.hqa-row-active td,
+.hqa-chart-table tr.hqa-row-active th {
+    background: #fff1f4;
+    color: #94445c;
+    font-weight: 650
+}
+
+@media(max-width:560px) {
+    .hqa-filter-extra {
+        gap: 12px
+    }
+
+    .hqa-price-range,
+    .hqa-price-range input {
+        width: 100%
+    }
+
+    .hqa-price-range input {
+        flex: 1;
+        min-width: 0
+    }
+}

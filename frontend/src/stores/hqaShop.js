@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { seedCategories, seedProducts, seedSizeChart } from '../data/hqaCatalog'
-import { getProducts } from '../services/api'
+import { getProducts, getCategories } from '../services/api'
 
 const KEY = 'hqa_frontend_demo_v1'
 const clone = (value) => JSON.parse(JSON.stringify(value))
@@ -9,6 +9,30 @@ function loadDemo() {
 }
 const cached = typeof localStorage === 'undefined' ? {} : loadDemo()
 const asArray = (v, def) => Array.isArray(v) ? v : clone(def)
+
+// Chuyển 1 sản phẩm từ API (PostgreSQL) sang định dạng mà giao diện đang dùng
+export function normalizeProduct(p) {
+  return {
+    id: String(p.id),
+    name: p.name,
+    categoryId: String(p.categoryId ?? p.category_id ?? ''),
+    categoryName: p.categoryName ?? p.category_name ?? '',
+    price: Number(p.price ?? 0),
+    oldPrice: Number(p.oldPrice ?? p.old_price ?? 0),
+    image: p.image ?? p.image_url ?? '',
+    sizes: Array.isArray(p.sizes) ? p.sizes : [],
+    colors: Array.isArray(p.colors) ? p.colors : [],
+    // Tồn kho theo từng cặp size + màu: [{ size, color, stock }]
+    variants: Array.isArray(p.variants)
+      ? p.variants.map(v => ({ size: v.size, color: v.color, stock: Number(v.stock ?? 0) }))
+      : [],
+    stock: Number(p.stock ?? 0),
+    featured: Boolean(p.featured ?? p.is_featured),
+    description: p.description ?? '',
+  }
+}
+const variantOf = (product, size, color) =>
+  (product.variants || []).find(v => v.size === size && v.color === color)
 
 export const useHqaShopStore = defineStore('hqaShop', {
   state: () => ({
@@ -42,8 +66,14 @@ export const useHqaShopStore = defineStore('hqaShop', {
       if (!product || !product.sizes.includes(size) || !product.colors.includes(color)) return false
       const key = `${productId}|${size}|${color}`
       const existing = this.cart.find(line => line.key === key)
-      const alreadyInCart = this.cart.filter(line => line.productId === productId).reduce((n, line) => n + line.qty, 0)
-      if (qty + alreadyInCart > product.stock) return false
+      const variant = variantOf(product, size, color)
+      if (product.variants?.length) {
+        // Có dữ liệu biến thể: chỉ cho mua cặp size + màu tồn tại và còn đủ hàng
+        if (!variant || qty + (existing?.qty || 0) > variant.stock) return false
+      } else {
+        const alreadyInCart = this.cart.filter(line => line.productId === productId).reduce((n, line) => n + line.qty, 0)
+        if (qty + alreadyInCart > product.stock) return false
+      }
       if (existing) existing.qty += qty
       else this.cart.push({ key, productId, size, color, qty })
       this.save()
@@ -54,14 +84,18 @@ export const useHqaShopStore = defineStore('hqaShop', {
       if (!item) return
       const product = this.products.find(p => p.id === item.productId)
       if (!product) return
+      const variant = variantOf(product, item.size, item.color)
       const otherQty = this.cart.filter(line => line.productId === item.productId && line.key !== key).reduce((n, line) => n + line.qty, 0)
-      item.qty = Math.min(Math.max(1, Math.floor(Number(quantity) || 1)), Math.max(1, product.stock - otherQty))
+      const limit = variant ? variant.stock : product.stock - otherQty
+      item.qty = Math.min(Math.max(1, Math.floor(Number(quantity) || 1)), Math.max(1, limit))
       this.save()
     },
     removeFromCart(key) { this.cart = this.cart.filter(line => line.key !== key); this.save() },
     placeOrder(customer) {
       if (!this.cartDetails.length) return null
       const invalidStock = this.cartDetails.some(line => {
+        const variant = variantOf(line.product, line.size, line.color)
+        if (line.product.variants?.length) return !variant || line.qty > variant.stock
         const totalQty = this.cartDetails.filter(x => x.productId === line.productId).reduce((n, x) => n + x.qty, 0)
         return totalQty > line.product.stock
       })
@@ -72,7 +106,11 @@ export const useHqaShopStore = defineStore('hqaShop', {
         subtotal: this.subtotal, shipping: this.subtotal >= 600000 ? 0 : 30000,
       }
       this.orders.unshift(order)
-      for (const line of this.cartDetails) line.product.stock -= line.qty
+      for (const line of this.cartDetails) {
+        line.product.stock -= line.qty
+        const variant = variantOf(line.product, line.size, line.color)
+        if (variant) variant.stock -= line.qty
+      }
       this.cart = []
       this.save()
       return order.id
@@ -86,6 +124,7 @@ export const useHqaShopStore = defineStore('hqaShop', {
       const found = this.products.find(p => p.id === payload.id)
       if (!found) return false
       Object.assign(found, payload)
+      found.variants = [] // admin demo sửa size/màu/tồn kho thủ công -> dùng lại logic tổng tồn kho
       this.save(); return true
     },
     addProduct(payload) {
@@ -118,24 +157,29 @@ export const useHqaShopStore = defineStore('hqaShop', {
           throw new Error('API không trả về danh sách sản phẩm hợp lệ')
         }
 
-        // Chuyển dữ liệu từ PostgreSQL sang định dạng
-        // mà giao diện hiện tại đang sử dụng.
-        this.products = rows.map((p) => ({
-          id: String(p.id),
-          name: p.name,
-          categoryId: String(p.categoryId ?? p.category_id ?? ''),
-          price: Number(p.price ?? 0),
-          oldPrice: Number(p.oldPrice ?? p.old_price ?? 0),
-          image: p.image ?? p.image_url ?? '',
-          sizes: Array.isArray(p.sizes) ? p.sizes : [],
-          colors: Array.isArray(p.colors) ? p.colors : [],
-          stock: Number(p.stock ?? 0),
-          featured: Boolean(p.featured),
-          description: p.description ?? '',
-        }))
+        this.products = rows.map(normalizeProduct)
       } catch (error) {
         console.error('Không thể tải sản phẩm:', error)
         throw error
+      }
+    },
+
+    // Thêm/cập nhật 1 sản phẩm vừa tải từ API vào store (để giỏ hàng, yêu thích tìm thấy được)
+    upsertProduct(raw) {
+      const product = normalizeProduct(raw)
+      const index = this.products.findIndex(p => p.id === product.id)
+      if (index >= 0) this.products.splice(index, 1, product)
+      else this.products.push(product)
+      return product
+    },
+
+    async fetchCategories() {
+      try {
+        const response = await getCategories()
+        const rows = response.data.data
+        if (Array.isArray(rows) && rows.length) this.categories = rows
+      } catch (error) {
+        console.error('Không thể tải danh mục:', error) // giữ danh mục mẫu
       }
     },
   },

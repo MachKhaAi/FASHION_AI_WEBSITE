@@ -12,7 +12,14 @@ defineProps({ product: { type: Object, required: true } });
         :aria-label="`Xem ${product.name}`"
         @click="openProduct(product)"
       />
-      <span>Ảnh {{ product.name }}</span>
+      <img
+        v-if="product.image"
+        class="ph-img"
+        :src="product.image"
+        :alt="product.name"
+        loading="lazy"
+      />
+      <span v-else>Ảnh {{ product.name }}</span>
       <div class="labels" v-if="product.tag">
         <span
           :class="[

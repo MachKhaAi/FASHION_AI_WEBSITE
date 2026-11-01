@@ -50,11 +50,11 @@ async function goHomeThen(next) {
   next?.();
 }
 function searchProducts() {
-  demo.query = searchText.value.trim();
-  demo.category = "Tất cả";
-  demo.tab = "Bán chạy";
+  // Tìm trong dữ liệu thật: chuyển sang trang sản phẩm với từ khóa trên URL
+  const text = searchText.value.trim();
   searchOpen.value = false;
-  goHomeThen(() => scrollToSection("products"));
+  menuOpen.value = false;
+  router.push({ name: "hqa-products", query: text ? { tim: text } : {} });
 }
 function subscribe() {
   newsletterStatus.value =
@@ -98,7 +98,11 @@ function handleClick(event) {
     goHomeThen(() => window.scrollTo({ top: 0 }));
     return;
   }
-  if (href === "#catalog" || href === "#products") {
+  if (href === "#products") {
+    router.push("/san-pham");
+    return;
+  }
+  if (href === "#catalog") {
     demo.category = target.dataset.cat || "Tất cả";
     demo.query = "";
     demo.tab = target.dataset.sale ? "Sale" : "Bán chạy";
@@ -168,7 +172,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", escape));
         </svg></button
       ><a class="logo" href="#home">HQA</a>
       <nav>
-        <a data-cat="Tất cả" href="#catalog">Sản phẩm mới</a
+        <a href="#products">Sản phẩm mới</a
         ><a data-cat="Váy" href="#catalog">Bộ sưu tập</a
         ><a href="#catalog">Bán chạy</a
         ><a class="sale" data-sale="1" href="#catalog">Sale</a
