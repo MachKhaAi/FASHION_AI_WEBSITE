@@ -1,4 +1,4 @@
-
+<!-- File: src/layouts/ShopLayout.vue -->
 <script setup>
 import {
   computed,
@@ -8,26 +8,14 @@ import {
   ref,
   watch,
 } from "vue";
-
 import { RouterView, RouterLink, useRouter, useRoute } from "vue-router";
-
 import HqaIcon from "../components/common/HqaIcon.vue";
 import { useAdminAuthStore } from "../stores/adminAuth";
-import {
-  demo,
-  message,
-  addSelected,
-  showFavorites,
-} from "../stores/hqaDemo";
-
-import {
-  useHqaShopStore,
-  hasUserToken,
-} from "../stores/hqaShop";
+import { demo, message, showFavorites } from "../stores/hqaDemo";
+import { useHqaShopStore, hasUserToken } from "../stores/hqaShop";
 
 const router = useRouter();
 const route = useRoute();
-
 const admin = useAdminAuthStore();
 const shop = useHqaShopStore();
 
@@ -36,22 +24,20 @@ const searchOpen = ref(false);
 const searchText = ref("");
 const menuOpen = ref(false);
 const dialogElement = ref(null);
+const isAddingToCart = ref(false); // Trạng thái loading của form thêm nhanh
+const activeMenuItem = ref("sale");
 
 const newsletterStatus = ref(
   "Chúng mình không gửi spam. Hủy bất cứ lúc nào."
 );
 
 // Số lượng sản phẩm thực tế trong giỏ hàng
-const cartCount = computed(() =>
-  hasUserToken() ? shop.cartCount : 0
-);
+const cartCount = computed(() => (hasUserToken() ? shop.cartCount : 0));
 
 // Cuộn đến một khu vực trên trang
 function scrollToSection(id) {
   nextTick(() => {
-    document
-      .getElementById(id)
-      ?.scrollIntoView({ block: "start" });
+    document.getElementById(id)?.scrollIntoView({ block: "start" });
   });
 }
 
@@ -61,17 +47,14 @@ async function goHomeThen(next) {
     await router.push("/");
     await nextTick();
   }
-
   next?.();
 }
 
 // Tìm kiếm sản phẩm
 function searchProducts() {
   const text = searchText.value.trim();
-
   searchOpen.value = false;
   menuOpen.value = false;
-
   router.push({
     name: "hqa-products",
     query: text ? { tim: text } : {},
@@ -87,7 +70,6 @@ function subscribe() {
 // Xử lý các thao tác trên Header, Footer và Bottom Navigation
 function handleClick(event) {
   const target = event.target.closest("a,button");
-
   if (!target) return;
 
   const action = target.dataset.action;
@@ -95,15 +77,11 @@ function handleClick(event) {
   // Tìm kiếm
   if (action === "search") {
     searchOpen.value = !searchOpen.value;
-
     if (searchOpen.value) {
       nextTick(() => {
-        document
-          .querySelector("#search-form input")
-          ?.focus();
+        document.querySelector("#search-form input")?.focus();
       });
     }
-
     return;
   }
 
@@ -120,7 +98,6 @@ function handleClick(event) {
   }
 
   const href = target.getAttribute("href");
-
   if (!href?.startsWith("#")) return;
 
   event.preventDefault();
@@ -132,14 +109,12 @@ function handleClick(event) {
       "Thông tin HQA",
       "Chính sách, ưu đãi và thông tin liên hệ hiện là nội dung minh họa từ mẫu thiết kế."
     );
-
     return;
   }
 
   // Cuộn đến khu vực cụ thể
   if (target.dataset.scroll) {
     const id = target.dataset.scroll;
-
     goHomeThen(() => scrollToSection(id));
     return;
   }
@@ -160,10 +135,7 @@ function handleClick(event) {
   if (href === "#catalog") {
     demo.category = target.dataset.cat || "Tất cả";
     demo.query = "";
-    demo.tab = target.dataset.sale
-      ? "Sale"
-      : "Bán chạy";
-
+    demo.tab = target.dataset.sale ? "Sale" : "Bán chạy";
     goHomeThen(() => scrollToSection("products"));
     return;
   }
@@ -172,15 +144,12 @@ function handleClick(event) {
   if (href === "#cart") {
     if (!hasUserToken()) {
       alert("Vui lòng đăng nhập để xem giỏ hàng!");
-
       router.push({
         path: "/dang-nhap",
         query: { redirect: "/gio-hang" },
       });
-
       return;
     }
-
     router.push("/gio-hang");
     return;
   }
@@ -188,14 +157,11 @@ function handleClick(event) {
   // Điều hướng các trang khác
   const routes = {
     "#chat": "/tu-van-size",
-    "#login": hasUserToken()
-      ? "/thong-tin-ca-nhan"
-      : "/dang-nhap",
+    "#login": hasUserToken() ? "/thong-tin-ca-nhan" : "/dang-nhap",
     "#profile": "/thong-tin-ca-nhan",
   };
 
   const routePath = routes[href];
-
   if (routePath) {
     router.push(routePath);
     return;
@@ -213,20 +179,18 @@ function handleClick(event) {
   );
 }
 
-// Đồng bộ hộp thoại với dữ liệu demo
+// Đồng bộ hộp thoại với dữ liệu
 watch(
   () => demo.dialog,
   async (value) => {
     await nextTick();
-
     if (!dialogElement.value) return;
-
     if (value && !dialogElement.value.open) {
       dialogElement.value.showModal();
     }
-
     if (!value && dialogElement.value.open) {
       dialogElement.value.close();
+      isAddingToCart.value = false; // Reset trạng thái khi đóng
     }
   }
 );
@@ -239,10 +203,56 @@ function escape(event) {
   }
 }
 
+// Hàm xử lý thêm vào giỏ hàng thật từ popup trên trang chủ
+async function handleRealAddToCart() {
+  if (!hasUserToken()) {
+    alert("Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng!");
+    demo.dialog = null;
+    router.push({ path: "/dang-nhap", query: { redirect: "/" } });
+    return;
+  }
+
+  isAddingToCart.value = true;
+  try {
+    const payload = demo.dialog;
+
+    // Kiểm tra tồn kho của lựa chọn
+    const variant = payload.product.variants?.find(
+      (v) => v.size === payload.size && v.color === payload.color
+    );
+
+    if (payload.product.variants?.length && (!variant || variant.stock <= 0)) {
+      alert(
+        `Lựa chọn Size ${payload.size} - Màu ${payload.color} hiện đang hết hàng.`
+      );
+      isAddingToCart.value = false;
+      return;
+    }
+
+    const result = await shop.addToCart(
+      payload.product.id,
+      payload.size,
+      payload.color, // Lấy màu người dùng chọn ở popup
+      1
+    );
+
+    if (result.ok) {
+      alert(result.message || "Đã thêm sản phẩm vào giỏ hàng!");
+      demo.dialog = null; // Đóng form khi thành công
+    } else {
+      alert(result.message || "Có lỗi xảy ra khi thêm vào giỏ hàng.");
+    }
+  } catch (error) {
+    console.error("Lỗi thêm nhanh:", error);
+    alert("Lỗi kết nối máy chủ.");
+  } finally {
+    isAddingToCart.value = false;
+  }
+}
+
 // Khởi tạo Layout
 onMounted(() => {
   document.title = "HQA · Trang chủ";
-
   admin.restore();
 
   // Tải giỏ hàng từ backend nếu khách hàng đã đăng nhập
@@ -260,18 +270,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div @click="handleClick">
-
     <div class="topbar">
       Freeship cho đơn từ 600K · Nhập HQA10 cho đơn đầu tiên
     </div>
 
     <header class="header">
-
-      <button
-        aria-label="Mở menu"
-        class="ib hamburger"
-        data-action="menu"
-      >
+      <button aria-label="Mở menu" class="ib hamburger" data-action="menu">
         <svg aria-hidden="true" class="icon" viewBox="0 0 24 24">
           <path d="M3 6h18M3 12h18M3 18h18"></path>
         </svg>
@@ -280,20 +284,43 @@ onBeforeUnmount(() => {
       <a class="logo" href="#home">HQA</a>
 
       <nav>
-        <a href="#products">Sản phẩm mới</a>
-        <a data-cat="Váy" href="#catalog">Bộ sưu tập</a>
-        <a href="#catalog">Bán chạy</a>
-        <a class="sale" data-sale="1" href="#catalog">Sale</a>
-        <a data-scroll="story" href="#home">Về chúng tôi</a>
+        <a 
+          href="#products" 
+          :class="{ active: activeMenuItem === 'new' }"
+          @click="activeMenuItem = 'new'"
+        >Sản phẩm </a>
+        
+        <a 
+          data-cat="Váy" 
+          href="#catalog"
+          :class="{ active: activeMenuItem === 'collection' }"
+          @click="activeMenuItem = 'collection'"
+        >Bộ sưu tập</a>
+        
+        <a 
+          href="#catalog"
+          :class="{ active: activeMenuItem === 'bestseller' }"
+          @click="activeMenuItem = 'bestseller'"
+        >Bán chạy</a>
+        
+        <a 
+          class="sale" 
+          data-sale="1" 
+          href="#catalog"
+          :class="{ active: activeMenuItem === 'sale' }"
+          @click="activeMenuItem = 'sale'"
+        >Sale</a>
+        
+        <a 
+          data-scroll="story" 
+          href="#home"
+          :class="{ active: activeMenuItem === 'about' }"
+          @click="activeMenuItem = 'about'"
+        >Về chúng tôi</a>
       </nav>
 
       <div class="icons">
-
-        <button
-          aria-label="Tìm kiếm"
-          class="ib"
-          data-action="search"
-        >
+        <button aria-label="Tìm kiếm" class="ib" data-action="search">
           <svg aria-hidden="true" class="icon" viewBox="0 0 24 24">
             <circle cx="10.5" cy="10.5" r="6.5"></circle>
             <path d="m16 16 5 5"></path>
@@ -310,11 +337,7 @@ onBeforeUnmount(() => {
           Admin
         </RouterLink>
 
-        <a
-          aria-label="Tài khoản"
-          class="ib desktop-only"
-          href="#login"
-        >
+        <a aria-label="Tài khoản" class="ib desktop-only" href="#login">
           <svg aria-hidden="true" class="icon" viewBox="0 0 24 24">
             <circle cx="12" cy="7" r="4"></circle>
             <path d="M4 21v-2a8 8 0 0 1 16 0v2"></path>
@@ -338,50 +361,33 @@ onBeforeUnmount(() => {
             <path d="M5 7h14l1 14H4L5 7Z"></path>
             <path d="M8 8V6a4 4 0 0 1 8 0v2"></path>
           </svg>
-
           <span class="badge">{{ cartCount }}</span>
         </a>
-
       </div>
     </header>
 
     <!-- Thanh tìm kiếm -->
     <div class="searchbar" id="searchbar" v-if="searchOpen">
-      <form
-        @submit.prevent="searchProducts"
-        class="row"
-        id="search-form"
-      >
+      <form @submit.prevent="searchProducts" class="row" id="search-form">
         <input
           aria-label="Tìm sản phẩm"
           name="query"
           placeholder="Bạn đang tìm váy, túi, hay phụ kiện gì?"
           v-model="searchText"
         />
-
         <button class="btn dark">Tìm kiếm</button>
       </form>
-
-      <small>
-        Đang hot: váy babydoll · áo cardigan · kẹp tóc ruy băng
-      </small>
+      <small>Đang hot: váy babydoll · áo cardigan · kẹp tóc ruy băng</small>
     </div>
 
     <!-- Menu điện thoại -->
-    <nav
-      v-if="menuOpen"
-      class="mobile-menu"
-      aria-label="Menu điện thoại"
-    >
+    <nav v-if="menuOpen" class="mobile-menu" aria-label="Menu điện thoại">
       <a href="#home">Trang chủ</a>
       <a href="#products">Sản phẩm</a>
       <a href="#chat">Tư vấn size</a>
       <a href="#login">Tài khoản</a>
 
-      <RouterLink
-        v-if="admin.isAuthenticated"
-        to="/admin"
-      >
+      <RouterLink v-if="admin.isAuthenticated" to="/admin">
         Admin
       </RouterLink>
     </nav>
@@ -393,26 +399,16 @@ onBeforeUnmount(() => {
     <!-- Newsletter -->
     <section class="newsletter">
       <h2>Nhận ngay voucher 10%</h2>
-
-      <p>
-        Đăng ký để biết bộ sưu tập mới và ưu đãi riêng.
-      </p>
-
-      <form
-        @submit.prevent="subscribe"
-        class="row"
-        id="newsletter"
-      >
+      <p>Đăng ký để biết bộ sưu tập mới và ưu đãi riêng.</p>
+      <form @submit.prevent="subscribe" class="row" id="newsletter">
         <input
           aria-label="Email nhận ưu đãi"
           placeholder="Email của bạn"
           required
           type="email"
         />
-
         <button class="btn">Đăng ký</button>
       </form>
-
       <small id="newsletter-status">
         {{ newsletterStatus }}
       </small>
@@ -420,23 +416,19 @@ onBeforeUnmount(() => {
 
     <!-- Footer -->
     <footer class="footer">
-
       <div class="footer-grid">
-
         <div>
           <a class="logo" href="#home">HQA</a>
           <p>Thời trang tinh tế, dịu dàng mỗi ngày.</p>
           <small>Instagram · TikTok · Facebook</small>
         </div>
-
         <div>
           <h4>Mua sắm</h4>
-          <a href="#products">Sản phẩm mới</a>
+          <a href="#products">Sản phẩm</a>
           <a href="#products">Bán chạy</a>
           <a href="#products">Bộ sưu tập</a>
           <a href="#products">Phụ kiện</a>
         </div>
-
         <div>
           <h4>Chính sách</h4>
           <a data-action="help" href="#">Đổi trả trong 7 ngày</a>
@@ -444,7 +436,6 @@ onBeforeUnmount(() => {
           <a data-action="help" href="#">Bảo mật</a>
           <a data-action="help" href="#">Hướng dẫn chọn size</a>
         </div>
-
         <div>
           <h4>Liên hệ</h4>
           <p>HQA Việt Nam</p>
@@ -452,13 +443,10 @@ onBeforeUnmount(() => {
           <a data-action="help" href="#">Trợ giúp mua sắm</a>
           <small>09:00–21:00 mỗi ngày</small>
         </div>
-
       </div>
-
       <div class="row between footer-bottom">
         <small>© 2026 HQA</small>
         <small>Thanh toán: Visa · MoMo · VietQR · COD</small>
-
         <RouterLink
           v-if="admin.isAuthenticated"
           to="/admin"
@@ -467,26 +455,22 @@ onBeforeUnmount(() => {
           Quản trị
         </RouterLink>
       </div>
-
     </footer>
 
     <!-- Bottom Navigation -->
     <nav class="bottomnav">
-
       <a href="#home">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
           <path d="m3 10 9-8 9 8v11H3V10ZM9 21v-8h6v8" />
         </svg>
         Trang chủ
       </a>
-
       <a href="#catalog">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" />
         </svg>
         Sản phẩm
       </a>
-
       <a href="#chat">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M21 11a9 9 0 0 1-9 9H3l2-5a9 9 0 1 1 16-4Z" />
@@ -494,14 +478,12 @@ onBeforeUnmount(() => {
         </svg>
         Tư vấn size
       </a>
-
       <a href="#orders">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
           <path d="m12 2 10 5-10 5L2 7l10-5ZM2 7v10l10 5 10-5V7M12 12v10" />
         </svg>
         Đơn hàng
       </a>
-
       <a href="#login">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="12" cy="7" r="4" />
@@ -509,7 +491,6 @@ onBeforeUnmount(() => {
         </svg>
         Tài khoản
       </a>
-
     </nav>
 
     <!-- Nút chatbot -->
@@ -519,10 +500,8 @@ onBeforeUnmount(() => {
         Tư vấn size
       </a>
     </div>
-
   </div>
 
-  <!-- Hộp thoại sản phẩm -->
   <dialog
     ref="dialogElement"
     class="dialog-shell"
@@ -531,61 +510,66 @@ onBeforeUnmount(() => {
     @close="demo.dialog = null"
   >
     <template v-if="demo.dialog">
-
       <h2 id="dialog-title">
         {{ demo.dialog.title }}
       </h2>
-
       <p>{{ demo.dialog.text }}</p>
 
-      <template v-if="demo.dialog.product">
-
+      <template v-if="demo.dialog.product && demo.dialog.type === 'real_add'">
+        <!-- Chọn Size thật -->
         <label for="quick-size">Kích thước</label>
-
-        <select
-          id="quick-size"
-          v-model="demo.dialog.size"
-        >
+        <select id="quick-size" v-model="demo.dialog.size">
           <option
-            v-for="size in ['Túi xách', 'Phụ kiện tóc'].includes(
-              demo.dialog.product.category
-            )
-              ? ['Một cỡ']
-              : ['S', 'M', 'L']"
+            v-for="size in demo.dialog.product.sizes"
             :key="size"
             :value="size"
           >
             {{ size }}
           </option>
         </select>
+        
+        <label for="quick-color" style="margin-top: 10px; display: block;">Màu sắc</label>
+        <select id="quick-color" v-model="demo.dialog.color">
+          <option
+            v-for="color in demo.dialog.product.colors"
+            :key="color"
+            :value="color"
+          >
+            {{ color }}
+          </option>
+        </select>
 
         <p>
           <small>
-            Màu kem mặc định · Thao tác giỏ hàng chỉ là mô phỏng.
+            Sản phẩm sẽ được thêm trực tiếp vào giỏ hàng của bạn.
           </small>
         </p>
-
+      </template>
+      
+      <!-- Thông báo cũ của hệ thống demo nếu không phải real_add -->
+      <template v-else-if="!demo.dialog.product">
+         <!-- Nội dung form thông báo bình thường -->
       </template>
 
-      <div class="row">
-
+      <div class="row" style="margin-top: 20px;">
         <button
           class="btn outline"
           @click="demo.dialog = null"
+          :disabled="isAddingToCart"
         >
           Đóng
         </button>
-
+        
+        <!-- Nút Thêm vào giỏ thật -->
         <button
-          v-if="demo.dialog.product"
+          v-if="demo.dialog.product && demo.dialog.type === 'real_add'"
           class="btn dark"
-          @click="addSelected"
+          @click="handleRealAddToCart"
+          :disabled="isAddingToCart"
         >
-          Thêm vào giỏ mẫu
+          {{ isAddingToCart ? 'Đang thêm...' : 'Thêm vào giỏ hàng' }}
         </button>
-
       </div>
-
     </template>
   </dialog>
 </template>

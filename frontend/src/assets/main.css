@@ -299,7 +299,7 @@ small {
   white-space: nowrap;
 }
 
-.sale {
+.header nav a.active {
   border-bottom: 3px solid var(--accent);
 }
 
