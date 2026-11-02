@@ -40,7 +40,7 @@ const visibleProducts = computed(() => {
           ><a class="btn dark" href="#products">Mua BST mới</a>
         </div>
       </div>
-      <div class="arch"><img class="ph-img" src="/images/home/hero.svg" alt="Bộ sưu tập thu 2026" /></div>
+      <div class="arch"><img class="ph-img" src="/images/home/hero.jpg" alt="Bộ sưu tập thu 2026" /></div>
       <div class="dots"><span></span><span></span><span></span></div>
     </section>
     <div class="container">
@@ -49,22 +49,22 @@ const visibleProducts = computed(() => {
         <p class="muted">Chọn nhóm sản phẩm bạn yêu thích</p>
         <div class="categories">
           <a class="category" data-cat="Váy" href="#products"
-            ><div class="ph tone0"><img class="ph-img" src="/images/home/cat-vay.svg" alt="Váy" loading="lazy" /></div>
+            ><div class="ph tone0"><img class="ph-img" src="/images/products/sp4.jpg" alt="Váy" loading="lazy" /></div>
             <p>Váy</p></a
           ><a class="category" data-cat="Áo" href="#products"
-            ><div class="ph tone1"><img class="ph-img" src="/images/home/cat-ao.svg" alt="Áo" loading="lazy" /></div>
+            ><div class="ph tone1"><img class="ph-img" src="/images/products/sp10.jpg" alt="Áo" loading="lazy" /></div>
             <p>Áo</p></a
           ><a class="category" data-cat="Quần &amp; chân váy" href="#products"
-            ><div class="ph tone2"><img class="ph-img" src="/images/home/cat-quan-chan-vay.svg" alt="Quần &amp; chân váy" loading="lazy" /></div>
+            ><div class="ph tone2"><img class="ph-img" src="/images/products/sp11.jpg" alt="Quần &amp; chân váy" loading="lazy" /></div>
             <p>Quần &amp; chân váy</p></a
           ><a class="category" data-cat="Set đồ" href="#products"
-            ><div class="ph tone3"><img class="ph-img" src="/images/home/cat-set.svg" alt="Set đồ" loading="lazy" /></div>
+            ><div class="ph tone3"><img class="ph-img" src="/images/products/sp7.jpg" alt="Set đồ" loading="lazy" /></div>
             <p>Set đồ</p></a
           ><a class="category" data-cat="Túi xách" href="#products"
-            ><div class="ph tone0"><img class="ph-img" src="/images/home/cat-tui-xach.svg" alt="Túi xách" loading="lazy" /></div>
+            ><div class="ph tone0"><img class="ph-img" src="/images/products/sp8.jpg" alt="Túi xách" loading="lazy" /></div>
             <p>Túi xách</p></a
           ><a class="category" data-cat="Phụ kiện tóc" href="#products"
-            ><div class="ph tone1"><img class="ph-img" src="/images/home/cat-phu-kien-toc.svg" alt="Phụ kiện tóc" loading="lazy" /></div>
+            ><div class="ph tone1"><img class="ph-img" src="/images/products/sp9.jpg" alt="Phụ kiện tóc" loading="lazy" /></div>
             <p>Phụ kiện tóc</p></a
           >
         </div>
@@ -123,10 +123,10 @@ const visibleProducts = computed(() => {
             Ưu đãi và thời gian minh họa
           </p>
         </div>
-        <div class="ph tone1"><img class="ph-img" src="/images/home/promo.svg" alt="Phụ kiện Mid-season Sale" loading="lazy" /></div>
+        <div class="ph tone1"><img class="ph-img" src="/images/home/promo.jpg" alt="Phụ kiện Mid-season Sale" loading="lazy" /></div>
       </section>
       <section class="story" id="story">
-        <div class="ph tone3"><img class="ph-img" src="/images/home/lookbook.svg" alt="Lookbook HQA" loading="lazy" /></div>
+        <div class="ph tone3"><img class="ph-img" src="/images/home/lookbook.jpg" alt="Lookbook HQA" loading="lazy" /></div>
         <div
           class="soft"
           style="

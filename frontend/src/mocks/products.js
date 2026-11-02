@@ -2,7 +2,7 @@ export const products = [
   {
     id: 0,
     name: "Váy babydoll hoa nhí",
-    image: "/images/products/sp4.svg",
+    image: "/images/products/sp4.jpg",
     price: 459000,
     oldPrice: 0,
     tag: "Best Seller",
@@ -11,7 +11,7 @@ export const products = [
   {
     id: 1,
     name: "Áo cardigan len mỏng",
-    image: "/images/products/sp5.svg",
+    image: "/images/products/sp5.jpg",
     price: 389000,
     oldPrice: 469000,
     tag: "-17%",
@@ -20,7 +20,7 @@ export const products = [
   {
     id: 2,
     name: "Chân váy xếp ly",
-    image: "/images/products/sp6.svg",
+    image: "/images/products/sp6.jpg",
     price: 329000,
     oldPrice: 0,
     tag: "",
@@ -29,7 +29,7 @@ export const products = [
   {
     id: 3,
     name: "Set croptop & chân váy",
-    image: "/images/products/sp7.svg",
+    image: "/images/products/sp7.jpg",
     price: 599000,
     oldPrice: 0,
     tag: "New",
@@ -38,7 +38,7 @@ export const products = [
   {
     id: 4,
     name: "Túi tote da mềm",
-    image: "/images/products/sp8.svg",
+    image: "/images/products/sp8.jpg",
     price: 519000,
     oldPrice: 649000,
     tag: "-20%",
@@ -47,7 +47,7 @@ export const products = [
   {
     id: 5,
     name: "Kẹp tóc ruy băng (set 3)",
-    image: "/images/products/sp9.svg",
+    image: "/images/products/sp9.jpg",
     price: 89000,
     oldPrice: 0,
     tag: "",
@@ -56,7 +56,7 @@ export const products = [
   {
     id: 6,
     name: "Áo sơ mi cổ nơ",
-    image: "/images/products/sp10.svg",
+    image: "/images/products/sp10.jpg",
     price: 359000,
     oldPrice: 0,
     tag: "New",
@@ -65,7 +65,7 @@ export const products = [
   {
     id: 7,
     name: "Quần ống rộng lưng cao",
-    image: "/images/products/sp11.svg",
+    image: "/images/products/sp11.jpg",
     price: 419000,
     oldPrice: 0,
     tag: "Best Seller",
