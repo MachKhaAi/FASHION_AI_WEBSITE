@@ -32,7 +32,7 @@ API.interceptors.request.use((config) => {
   if (url.startsWith('/admin')) {
     const token = readStorage(ADMIN_TOKEN_KEY)
     if (token) config.headers.Authorization = `Bearer ${token}`
-  } else if (url.startsWith('/auth')) {
+  } else if (url.startsWith('/auth') || url.startsWith('/cart')) {
     const token = readStorage(USER_TOKEN_KEY)
     if (token) config.headers.Authorization = `Bearer ${token}`
   }
@@ -89,5 +89,12 @@ export const checkAiSize = (userData) =>
   API.post('/size-advisor', userData)
 
 export const testDatabase = () => API.get('/test-db')
+
+// Thêm các hàm API giỏ hàng:
+export const getCart = () => API.get('/cart')
+export const apiAddToCart = (payload) => API.post('/cart/items', payload)
+export const apiUpdateCartItem = (cartItemId, quantity) => API.put(`/cart/items/${cartItemId}`, { quantity })
+export const apiRemoveCartItem = (cartItemId) => API.delete(`/cart/items/${cartItemId}`)
+export const apiClearCart = () => API.delete('/cart')
 
 export default API

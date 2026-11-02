@@ -1,7 +1,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useHqaShopStore, normalizeProduct } from '../../stores/hqaShop'
+import { useHqaShopStore, normalizeProduct, hasUserToken } from '../../stores/hqaShop'
 import { getProductById, getProducts, getProductSizeChart } from '../../services/api'
 import { money } from '../../data/hqaCatalog'
 import HqaSizeAdvisor from '../../components/chatbot/HqaSizeAdvisor.vue'
@@ -12,12 +12,14 @@ const shop = useHqaShopStore(), route = useRoute(), router = useRouter()
 
 const product = ref(null)
 const loading = ref(false)
-const loadError = ref('') // '' | 'notfound' | 'error'
+const loadError = ref('') 
 const related = ref([])
 const size = ref(''), color = ref(''), qty = ref(1), notice = ref(''), showChart = ref(false), showAdvisor = ref(false)
 const chart = reactive({ productId: '', rows: [], loading: false, error: '', message: '' })
 
-// ---------- Biến thể (size + màu + tồn kho) ----------
+// Cờ đánh dấu sản phẩm được thêm vào giỏ nhờ AI tư vấn size
+const isAiRecommended = ref(false)
+
 const variants = computed(() => product.value?.variants || [])
 const hasVariants = computed(() => variants.value.length > 0)
 const variantOf = (s, c) => variants.value.find(v => v.size === s && v.color === c)
@@ -25,15 +27,22 @@ const sizeInStock = (s) => hasVariants.value ? variants.value.some(v => v.size =
 const colorInStock = (c) => hasVariants.value ? variants.value.some(v => v.color === c && v.stock > 0) : (product.value?.stock || 0) > 0
 const currentStock = computed(() => hasVariants.value ? (variantOf(size.value, color.value)?.stock ?? 0) : (product.value?.stock || 0))
 
-// Chọn size: nếu size đó không có ở màu hiện tại thì tự chuyển sang màu còn hàng
 function pickSize(s) {
   size.value = s
+  isAiRecommended.value = false // Tự chọn bằng tay thì tắt cờ AI
   if (hasVariants.value && !(variantOf(s, color.value)?.stock > 0)) {
     const match = variants.value.find(v => v.size === s && v.stock > 0)
     if (match) color.value = match.color
   }
 }
-// Chọn màu: nếu màu đó không có ở size hiện tại thì tự chuyển sang size còn hàng
+
+// Khi chọn size từ trợ lý AI
+function pickAiSize(s) {
+  pickSize(s)
+  isAiRecommended.value = true // Bật cờ AI tư vấn
+  showAdvisor.value = false
+}
+
 function pickColor(c) {
   color.value = c
   if (hasVariants.value && !(variantOf(size.value, c)?.stock > 0)) {
@@ -41,17 +50,18 @@ function pickColor(c) {
     if (match) size.value = match.size
   }
 }
+
 function pickDefaults(p) {
   const first = p.variants?.find(v => v.stock > 0) || p.variants?.[0]
   size.value = first?.size || p.sizes[0] || ''
   color.value = first?.color || p.colors[0] || ''
   qty.value = 1
   notice.value = ''
+  isAiRecommended.value = false
 }
-// Đổi size/màu thì số lượng không được vượt tồn kho của biến thể mới
+
 watch([size, color], () => { qty.value = Math.max(1, Math.min(qty.value, currentStock.value || 1)) })
 
-// ---------- Tải dữ liệu ----------
 let requestId = 0
 async function loadProduct(id) {
   const token = ++requestId
@@ -64,7 +74,6 @@ async function loadProduct(id) {
   try {
     const response = await getProductById(id)
     if (token !== requestId) return
-    // Đưa vào store để giỏ hàng / yêu thích tìm thấy sản phẩm này
     product.value = shop.upsertProduct(response.data.data)
     pickDefaults(product.value)
     loadRelated(product.value, token)
@@ -73,7 +82,6 @@ async function loadProduct(id) {
     if (error.response?.status === 404) {
       loadError.value = 'notfound'
     } else {
-      // Mất kết nối: thử dùng bản đã lưu trong store
       const local = shop.products.find(p => p.id === id)
       if (local) { product.value = local; pickDefaults(local) }
       else loadError.value = 'error'
@@ -96,7 +104,6 @@ async function loadRelated(p, token) {
 
 watch(() => route.params.id, (id) => { if (id) loadProduct(String(id)) }, { immediate: true })
 
-// ---------- Bảng kích thước (lấy từ DB, chỉ các size mà sản phẩm có) ----------
 async function openChart() {
   showChart.value = true
   const id = product.value.id
@@ -108,15 +115,44 @@ async function openChart() {
     Object.assign(chart, { rows: response.data.data || [], message: response.data.message || '', loading: false })
   } catch {
     if (chart.productId !== id) return
-    Object.assign(chart, { error: 'Không thể tải bảng kích thước. Vui lòng thử lại.', loading: false, productId: '' }) // productId rỗng: lần mở sau sẽ tải lại
+    Object.assign(chart, { error: 'Không thể tải bảng kích thước. Vui lòng thử lại.', loading: false, productId: '' })
   }
 }
 
-function add() {
-  if (currentStock.value <= 0) { notice.value = 'Lựa chọn này đã hết hàng. Vui lòng chọn size hoặc màu khác.'; return }
-  notice.value = shop.addToCart(product.value.id, size.value, color.value, qty.value) ? 'Đã thêm sản phẩm vào giỏ hàng ♡' : 'Không thể thêm: số lượng vượt quá tồn kho hoặc tùy chọn không hợp lệ.'
+// Thêm vào giỏ hàng (Chặn khách vãng lai)
+async function add() {
+  if (!hasUserToken()) {
+    alert('Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng!')
+    router.push({ path: '/dang-nhap', query: { redirect: route.fullPath } })
+    return
+  }
+
+  if (currentStock.value <= 0) {
+    notice.value = 'Lựa chọn này đã hết hàng. Vui lòng chọn size hoặc màu khác.'
+    return
+  }
+
+  const result = await shop.addToCart(
+    product.value.id,
+    size.value,
+    color.value,
+    qty.value,
+    {
+      isAiRecommended: isAiRecommended.value,
+      aiFitNote: isAiRecommended.value ? `Size ${size.value} được gợi ý bởi AI` : null,
+    }
+  )
+
+  if (result.requireLogin) {
+    alert(result.message)
+    router.push({ path: '/dang-nhap', query: { redirect: route.fullPath } })
+    return
+  }
+
+  notice.value = result.message
 }
 </script>
+
 <template>
   <main class="hqa-page">
     <div v-if="loading" class="hqa-empty" role="status"><p class="hqa-dim">Đang tải sản phẩm...</p></div>
@@ -150,7 +186,7 @@ function add() {
           <p class="hqa-dim" style="margin-top:10px">Dòng được tô nền là size bạn đang chọn.</p>
         </template>
         <button class="hqa-primary" style="margin-top:19px" @click="showChart=false">Đã hiểu</button></div></div>
-      <div v-if="showAdvisor" class="hqa-modal-backdrop" @click.self="showAdvisor=false"><div class="hqa-modal" style="padding:0" role="dialog" aria-modal="true" aria-label="Tư vấn size"><div style="padding:12px 14px;background:#fff;display:flex;justify-content:flex-end"><button class="hqa-close" type="button" aria-label="Đóng" @click="showAdvisor=false">×</button></div><HqaSizeAdvisor :product="product" @choose-size="pickSize($event); showAdvisor=false" /></div></div>
+      <div v-if="showAdvisor" class="hqa-modal-backdrop" @click.self="showAdvisor=false"><div class="hqa-modal" style="padding:0" role="dialog" aria-modal="true" aria-label="Tư vấn size"><div style="padding:12px 14px;background:#fff;display:flex;justify-content:flex-end"><button class="hqa-close" type="button" aria-label="Đóng" @click="showAdvisor=false">×</button></div><HqaSizeAdvisor :product="product" @choose-size="pickAiSize($event)" /></div></div>
     </template>
     <div v-else-if="loadError==='error'" class="hqa-empty"><h1>Không thể tải sản phẩm</h1><p class="hqa-dim">Vui lòng kiểm tra kết nối rồi thử lại.</p><button class="hqa-primary" @click="loadProduct(String(route.params.id))">Thử lại</button></div>
     <div v-else class="hqa-empty"><h1>Không tìm thấy sản phẩm</h1><button class="hqa-primary" @click="router.push('/san-pham')">Quay về cửa hàng</button></div>
