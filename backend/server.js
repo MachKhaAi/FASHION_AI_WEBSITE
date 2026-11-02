@@ -5,6 +5,7 @@ const db = require('./config/db');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const productRoutes = require('./routes/products');
+const cartRoutes = require('./routes/cart');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -24,6 +25,8 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/auth', authRoutes);
 // Đường dẫn ngắn cho frontend đã viết sẵn: /api/login, /api/register, /api/me
 app.use('/api', authRoutes);
+// Giỏ hàng
+app.use('/api/cart', cartRoutes);
 
 // 1. API kiểm tra kết nối Database
 app.get('/api/test-db', async (req, res) => {

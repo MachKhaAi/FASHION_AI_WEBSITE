@@ -1,6 +1,14 @@
 import { defineStore } from 'pinia'
 import { seedCategories, seedProducts, seedSizeChart } from '../data/hqaCatalog'
-import { getProducts, getCategories } from '../services/api'
+import {
+  getProducts,
+  getCategories,
+  getCart,
+  apiAddToCart,
+  apiUpdateCartItem,
+  apiRemoveCartItem,
+  apiClearCart,
+} from '../services/api'
 
 const KEY = 'hqa_frontend_demo_v1'
 const clone = (value) => JSON.parse(JSON.stringify(value))
@@ -10,7 +18,16 @@ function loadDemo() {
 const cached = typeof localStorage === 'undefined' ? {} : loadDemo()
 const asArray = (v, def) => Array.isArray(v) ? v : clone(def)
 
-// Chuyển 1 sản phẩm từ API (PostgreSQL) sang định dạng mà giao diện đang dùng
+// Kiểm tra xem người dùng đã đăng nhập (có token) hay chưa
+export function hasUserToken() {
+  try {
+    return !!localStorage.getItem('hqa_user_token')
+  } catch {
+    return false
+  }
+}
+
+// Chuyển đổi 1 sản phẩm từ API (PostgreSQL) sang định dạng hiển thị của giao diện
 export function normalizeProduct(p) {
   return {
     id: String(p.id),
@@ -22,7 +39,6 @@ export function normalizeProduct(p) {
     image: p.image ?? p.image_url ?? '',
     sizes: Array.isArray(p.sizes) ? p.sizes : [],
     colors: Array.isArray(p.colors) ? p.colors : [],
-    // Tồn kho theo từng cặp size + màu: [{ size, color, stock }]
     variants: Array.isArray(p.variants)
       ? p.variants.map(v => ({ size: v.size, color: v.color, stock: Number(v.stock ?? 0) }))
       : [],
@@ -31,155 +47,321 @@ export function normalizeProduct(p) {
     description: p.description ?? '',
   }
 }
-const variantOf = (product, size, color) =>
-  (product.variants || []).find(v => v.size === size && v.color === color)
 
 export const useHqaShopStore = defineStore('hqaShop', {
   state: () => ({
     products: asArray(cached.products, seedProducts),
     categories: asArray(cached.categories, seedCategories),
     sizeChart: asArray(cached.sizeChart, seedSizeChart),
-    cart: asArray(cached.cart, []),
+    cart: [], // Giỏ hàng lấy trực tiếp từ PostgreSQL của user đang đăng nhập
+    cartLoading: false,
     favorites: asArray(cached.favorites, []),
     orders: asArray(cached.orders, []),
     viewer: cached.viewer && typeof cached.viewer === 'object' ? cached.viewer : null,
   }),
+
   getters: {
+    // Tổng số lượng sản phẩm trong giỏ hàng (hiển thị trên icon giỏ hàng header)
     cartCount: (s) => s.cart.reduce((total, line) => total + line.qty, 0),
-    cartDetails: (s) => s.cart.map(line => ({ ...line, product: s.products.find(p => p.id === line.productId) })).filter(line => !!line.product),
-    subtotal() { return this.cartDetails.reduce((total, line) => total + line.product.price * line.qty, 0) },
-    favoriteProducts: (s) => s.products.filter(p => s.favorites.includes(p.id)),
+
+    // Chi tiết từng dòng giỏ hàng (tương thích hoàn hảo với CartView.vue & CheckoutView.vue)
+    cartDetails: (s) =>
+      s.cart.map((line) => ({
+        ...line,
+        product: line.product || s.products.find((p) => p.id === line.productId) || {
+          id: line.productId,
+          name: line.name,
+          price: line.price,
+          oldPrice: line.oldPrice || 0,
+          image: line.image,
+          stock: line.stock,
+        },
+      })),
+
+    // Tính tổng tiền tạm tính (Subtotal) của toàn bộ giỏ hàng
+    subtotal() {
+      return this.cartDetails.reduce(
+        (total, line) => total + Number(line.product.price || 0) * line.qty,
+        0
+      )
+    },
+
+    favoriteProducts: (s) => s.products.filter((p) => s.favorites.includes(p.id)),
   },
+
   actions: {
     save() {
       try {
-        localStorage.setItem(KEY, JSON.stringify({ products: this.products, categories: this.categories, sizeChart: this.sizeChart, cart: this.cart, favorites: this.favorites, orders: this.orders, viewer: this.viewer }))
-      } catch (error) { console.warn('Không thể lưu dữ liệu demo vào trình duyệt', error) }
-    },
-    toggleFavorite(id) {
-      this.favorites = this.favorites.includes(id) ? this.favorites.filter(item => item !== id) : [...this.favorites, id]
-      this.save()
-    },
-    addToCart(productId, size, color, quantity = 1) {
-      const product = this.products.find(p => p.id === productId)
-      const qty = Math.max(1, Math.floor(Number(quantity) || 1))
-      if (!product || !product.sizes.includes(size) || !product.colors.includes(color)) return false
-      const key = `${productId}|${size}|${color}`
-      const existing = this.cart.find(line => line.key === key)
-      const variant = variantOf(product, size, color)
-      if (product.variants?.length) {
-        // Có dữ liệu biến thể: chỉ cho mua cặp size + màu tồn tại và còn đủ hàng
-        if (!variant || qty + (existing?.qty || 0) > variant.stock) return false
-      } else {
-        const alreadyInCart = this.cart.filter(line => line.productId === productId).reduce((n, line) => n + line.qty, 0)
-        if (qty + alreadyInCart > product.stock) return false
+        localStorage.setItem(
+          KEY,
+          JSON.stringify({
+            products: this.products,
+            categories: this.categories,
+            sizeChart: this.sizeChart,
+            favorites: this.favorites,
+            orders: this.orders,
+            viewer: this.viewer,
+          })
+        )
+      } catch (error) {
+        console.warn('Không thể lưu dữ liệu vào trình duyệt', error)
       }
-      if (existing) existing.qty += qty
-      else this.cart.push({ key, productId, size, color, qty })
-      this.save()
-      return true
     },
-    updateQuantity(key, quantity) {
-      const item = this.cart.find(line => line.key === key)
-      if (!item) return
-      const product = this.products.find(p => p.id === item.productId)
-      if (!product) return
-      const variant = variantOf(product, item.size, item.color)
-      const otherQty = this.cart.filter(line => line.productId === item.productId && line.key !== key).reduce((n, line) => n + line.qty, 0)
-      const limit = variant ? variant.stock : product.stock - otherQty
-      item.qty = Math.min(Math.max(1, Math.floor(Number(quantity) || 1)), Math.max(1, limit))
+
+    // Chuyển đổi dữ liệu từ API giỏ hàng sang state.cart của Pinia
+    setCartFromApi(cartData) {
+      const items = cartData?.items || []
+      this.cart = items.map((item) => ({
+        key: `${item.productId}|${item.size}|${item.color}`,
+        cartItemId: item.cartItemId,
+        productId: item.productId,
+        size: item.size,
+        color: item.color,
+        qty: Number(item.quantity) || 1,
+        stock: Number(item.stock) || 0, // Tồn kho của đúng biến thể Size + Màu
+        isAiRecommended: Boolean(item.isAiRecommended), // Cờ nhận biết do AI tư vấn
+        aiFitNote: item.aiFitNote || null,             // Ghi chú số đo từ AI
+        product: {
+          id: item.productId,
+          name: item.name,
+          price: Number(item.price) || 0,
+          oldPrice: Number(item.oldPrice) || 0,
+          image: item.image,
+          stock: Number(item.stock) || 0,
+        },
+      }))
+    },
+
+    // 1. Tải giỏ hàng từ Server (PostgreSQL)
+    async fetchCart() {
+      if (!hasUserToken()) {
+        this.cart = []
+        return
+      }
+      this.cartLoading = true
+      try {
+        const response = await getCart()
+        if (response.data?.success) {
+          this.setCartFromApi(response.data.data)
+        }
+      } catch (error) {
+        if (error.response?.status === 401) {
+          this.cart = []
+        }
+        console.error('Không thể tải giỏ hàng:', error)
+      } finally {
+        this.cartLoading = false
+      }
+    },
+
+    // 2. Thêm sản phẩm vào giỏ hàng (Hỗ trợ cờ AI tư vấn size)
+    async addToCart(productId, size, color, quantity = 1, aiOptions = {}) {
+      if (!hasUserToken()) {
+        return {
+          ok: false,
+          requireLogin: true,
+          message: 'Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng!',
+        }
+      }
+      try {
+        const response = await apiAddToCart({
+          productId,
+          size,
+          color,
+          quantity: Math.max(1, Math.floor(Number(quantity) || 1)),
+          isAiRecommended: Boolean(aiOptions.isAiRecommended),
+          aiFitNote: aiOptions.aiFitNote || null,
+        })
+        this.setCartFromApi(response.data.data)
+        return {
+          ok: true,
+          message: response.data.message || 'Đã thêm sản phẩm vào giỏ hàng ♡',
+        }
+      } catch (error) {
+        if (error.response?.status === 401) {
+          return {
+            ok: false,
+            requireLogin: true,
+            message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại!',
+          }
+        }
+        return {
+          ok: false,
+          message:
+            error.response?.data?.message ||
+            'Không thể thêm: số lượng vượt quá tồn kho hoặc tùy chọn không hợp lệ.',
+        }
+      }
+    },
+
+    // 3. Cập nhật số lượng sản phẩm trong giỏ hàng
+    async updateQuantity(key, quantity) {
+      const item = this.cart.find((line) => line.key === key)
+      if (!item || !item.cartItemId) return { ok: false }
+
+      try {
+        const response = await apiUpdateCartItem(item.cartItemId, quantity)
+        this.setCartFromApi(response.data.data)
+        return { ok: true }
+      } catch (error) {
+        const msg = error.response?.data?.message || 'Không thể cập nhật số lượng!'
+        alert(msg)
+        return { ok: false, message: msg }
+      }
+    },
+
+    // 4. Xóa một sản phẩm khỏi giỏ hàng
+    async removeFromCart(key) {
+      const item = this.cart.find((line) => line.key === key)
+      if (!item || !item.cartItemId) return
+
+      try {
+        const response = await apiRemoveCartItem(item.cartItemId)
+        this.setCartFromApi(response.data.data)
+      } catch (error) {
+        console.error('Lỗi xóa sản phẩm khỏi giỏ:', error)
+      }
+    },
+
+    // 5. Làm trống giỏ hàng (sau khi đặt hàng thành công)
+    async clearCart() {
+      if (!hasUserToken()) {
+        this.cart = []
+        return
+      }
+      try {
+        const response = await apiClearCart()
+        this.setCartFromApi(response.data.data)
+      } catch (error) {
+        console.error('Lỗi làm trống giỏ:', error)
+      }
+    },
+
+    toggleFavorite(id) {
+      this.favorites = this.favorites.includes(id)
+        ? this.favorites.filter((item) => item !== id)
+        : [...this.favorites, id]
       this.save()
     },
-    removeFromCart(key) { this.cart = this.cart.filter(line => line.key !== key); this.save() },
+
     placeOrder(customer) {
       if (!this.cartDetails.length) return null
-      const invalidStock = this.cartDetails.some(line => {
-        const variant = variantOf(line.product, line.size, line.color)
-        if (line.product.variants?.length) return !variant || line.qty > variant.stock
-        const totalQty = this.cartDetails.filter(x => x.productId === line.productId).reduce((n, x) => n + x.qty, 0)
-        return totalQty > line.product.stock
-      })
-      if (invalidStock) return null
       const order = {
-        id: `HQA-${Date.now()}`, createdAt: new Date().toISOString(), status: 'Chờ xác nhận (demo)',
-        customer: clone(customer), items: this.cartDetails.map(({ product, qty, size, color }) => ({ productId: product.id, name: product.name, price: product.price, image: product.image, qty, size, color })),
-        subtotal: this.subtotal, shipping: this.subtotal >= 600000 ? 0 : 30000,
+        id: `HQA-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        status: 'Chờ xác nhận',
+        customer: clone(customer),
+        items: this.cartDetails.map(({ product, qty, size, color }) => ({
+          productId: product.id,
+          name: product.name,
+          price: product.price,
+          image: product.image,
+          qty,
+          size,
+          color,
+        })),
+        subtotal: this.subtotal,
+        shipping: this.subtotal >= 600000 ? 0 : 30000,
       }
       this.orders.unshift(order)
-      for (const line of this.cartDetails) {
-        line.product.stock -= line.qty
-        const variant = variantOf(line.product, line.size, line.color)
-        if (variant) variant.stock -= line.qty
-      }
-      this.cart = []
+      this.clearCart()
       this.save()
       return order.id
     },
+
     setViewer(person) {
-      this.viewer = { name: String(person.name || '').trim(), email: String(person.email || '').trim(), phone: String(person.phone || '').trim() }
+      this.viewer = {
+        name: String(person.name || '').trim(),
+        email: String(person.email || '').trim(),
+        phone: String(person.phone || '').trim(),
+      }
       this.save()
     },
-    logout() { this.viewer = null; this.save() },
+
+    logout() {
+      this.viewer = null
+      this.cart = []
+      this.save()
+    },
+
+    // Các hàm quản lý sản phẩm / danh mục sẵn có trong hệ thống
     updateProduct(payload) {
-      const found = this.products.find(p => p.id === payload.id)
+      const found = this.products.find((p) => p.id === payload.id)
       if (!found) return false
       Object.assign(found, payload)
-      found.variants = [] // admin demo sửa size/màu/tồn kho thủ công -> dùng lại logic tổng tồn kho
-      this.save(); return true
+      found.variants = []
+      this.save()
+      return true
     },
     addProduct(payload) {
       const id = `sp-${Date.now()}`
-      this.products.unshift({ id, name: '', categoryId: 'ao', price: 0, oldPrice: 0, image: '', sizes: ['S', 'M', 'L'], colors: ['Kem'], stock: 0, featured: false, description: '', ...payload, id })
-      this.save(); return id
+      this.products.unshift({
+        id,
+        name: '',
+        categoryId: 'ao',
+        price: 0,
+        oldPrice: 0,
+        image: '',
+        sizes: ['S', 'M', 'L'],
+        colors: ['Kem'],
+        stock: 0,
+        featured: false,
+        description: '',
+        ...payload,
+        id,
+      })
+      this.save()
+      return id
     },
     deleteProduct(id) {
-      this.products = this.products.filter(p => p.id !== id)
-      this.cart = this.cart.filter(p => p.productId !== id)
-      this.favorites = this.favorites.filter(f => f !== id)
+      this.products = this.products.filter((p) => p.id !== id)
+      this.cart = this.cart.filter((p) => p.productId !== id)
+      this.favorites = this.favorites.filter((f) => f !== id)
       this.save()
     },
     addCategory(name) {
-      const trimmed = name.trim(); if (!trimmed || this.categories.some(c => c.name.toLowerCase() === trimmed.toLowerCase())) return false
-      this.categories.push({ id: `dm-${Date.now()}`, name: trimmed, icon: '✿' }); this.save(); return true
+      const trimmed = name.trim()
+      if (!trimmed || this.categories.some((c) => c.name.toLowerCase() === trimmed.toLowerCase()))
+        return false
+      this.categories.push({ id: `dm-${Date.now()}`, name: trimmed, icon: '✿' })
+      this.save()
+      return true
     },
     deleteCategory(id) {
-      if (this.products.some(p => p.categoryId === id)) return false
-      this.categories = this.categories.filter(c => c.id !== id); this.save(); return true
+      if (this.products.some((p) => p.categoryId === id)) return false
+      this.categories = this.categories.filter((c) => c.id !== id)
+      this.save()
+      return true
     },
-    updateSizeChart(rows) { this.sizeChart = clone(rows); this.save() },
-
+    updateSizeChart(rows) {
+      this.sizeChart = clone(rows)
+      this.save()
+    },
     async fetchProducts() {
       try {
         const response = await getProducts()
         const rows = response.data.data
-
-        if (!Array.isArray(rows)) {
-          throw new Error('API không trả về danh sách sản phẩm hợp lệ')
-        }
-
+        if (!Array.isArray(rows)) throw new Error('API không trả về danh sách sản phẩm hợp lệ')
         this.products = rows.map(normalizeProduct)
       } catch (error) {
         console.error('Không thể tải sản phẩm:', error)
         throw error
       }
     },
-
-    // Thêm/cập nhật 1 sản phẩm vừa tải từ API vào store (để giỏ hàng, yêu thích tìm thấy được)
     upsertProduct(raw) {
       const product = normalizeProduct(raw)
-      const index = this.products.findIndex(p => p.id === product.id)
+      const index = this.products.findIndex((p) => p.id === product.id)
       if (index >= 0) this.products.splice(index, 1, product)
       else this.products.push(product)
       return product
     },
-
     async fetchCategories() {
       try {
         const response = await getCategories()
         const rows = response.data.data
         if (Array.isArray(rows) && rows.length) this.categories = rows
       } catch (error) {
-        console.error('Không thể tải danh mục:', error) // giữ danh mục mẫu
+        console.error('Không thể tải danh mục:', error)
       }
     },
   },
