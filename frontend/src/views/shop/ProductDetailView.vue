@@ -20,6 +20,28 @@ const chart = reactive({ productId: '', rows: [], loading: false, error: '', mes
 // Cờ đánh dấu sản phẩm được thêm vào giỏ nhờ AI tư vấn size
 const isAiRecommended = ref(false)
 
+// ---------- Thư viện ảnh theo màu ----------
+const activeIndex = ref(0)
+const images = computed(() => {
+  const p = product.value
+  if (!p) return []
+  const list = (p.images || []).filter(i => i && i.url)
+  return list.length ? list : [{ url: p.image, color: null }]
+})
+const activeImage = computed(() => images.value[activeIndex.value] || images.value[0] || { url: '', color: null })
+const colorThumb = (c) => images.value.find(i => i.color === c)?.url || ''
+// Hiện ảnh đầu tiên của màu đang chọn
+function showColorImage() {
+  const i = images.value.findIndex(img => img.color === color.value)
+  if (i >= 0) activeIndex.value = i
+}
+// Bấm vào ảnh nhỏ: đổi ảnh lớn và đồng bộ màu tương ứng
+function selectImage(i) {
+  const c = images.value[i]?.color
+  if (c && c !== color.value) pickColor(c)
+  activeIndex.value = i
+}
+
 const variants = computed(() => product.value?.variants || [])
 const hasVariants = computed(() => variants.value.length > 0)
 const variantOf = (s, c) => variants.value.find(v => v.size === s && v.color === c)
@@ -32,7 +54,7 @@ function pickSize(s) {
   isAiRecommended.value = false // Tự chọn bằng tay thì tắt cờ AI
   if (hasVariants.value && !(variantOf(s, color.value)?.stock > 0)) {
     const match = variants.value.find(v => v.size === s && v.stock > 0)
-    if (match) color.value = match.color
+    if (match) { color.value = match.color; showColorImage() }
   }
 }
 
@@ -49,10 +71,15 @@ function pickColor(c) {
     const match = variants.value.find(v => v.color === c && v.stock > 0)
     if (match) size.value = match.size
   }
+  showColorImage()
 }
 
 function pickDefaults(p) {
-  const first = p.variants?.find(v => v.stock > 0) || p.variants?.[0]
+  // Ưu tiên màu của ảnh đầu tiên để ảnh lớn và màu được chọn luôn khớp nhau lúc mới vào trang
+  const firstColor = p.images?.[0]?.color
+  const first = p.variants?.find(v => v.color === firstColor && v.stock > 0)
+    || p.variants?.find(v => v.stock > 0) || p.variants?.[0]
+  activeIndex.value = 0
   size.value = first?.size || p.sizes[0] || ''
   color.value = first?.color || p.colors[0] || ''
   qty.value = 1
@@ -159,13 +186,21 @@ async function add() {
     <template v-else-if="product">
       <nav class="hqa-breadcrumb" aria-label="Đường dẫn"><router-link to="/">Trang chủ</router-link> › <router-link to="/san-pham">Sản phẩm</router-link> › {{ product.name }}</nav>
       <div class="hqa-detail">
-        <div class="hqa-detail-figure"><img :src="product.image" :alt="product.name" /></div>
+        <div class="hqa-detail-media">
+          <div class="hqa-detail-figure"><img :src="activeImage.url" :alt="activeImage.color ? `${product.name} - màu ${activeImage.color}` : product.name" /></div>
+          <div v-if="images.length > 1" class="hqa-thumbs" role="list" aria-label="Các mẫu của sản phẩm">
+            <button v-for="(img, i) in images" :key="img.url" type="button" role="listitem" class="hqa-thumb" :class="{ active: i === activeIndex }" :aria-label="img.color ? `Xem mẫu màu ${img.color}` : `Xem ảnh ${i + 1}`" :aria-current="i === activeIndex" @click="selectImage(i)">
+              <img :src="img.url" :alt="img.color || `Ảnh ${i + 1}`" loading="lazy" />
+              <span v-if="img.color">{{ img.color }}</span>
+            </button>
+          </div>
+        </div>
         <div class="hqa-detail-info">
           <div class="hqa-eyebrow">HQA · {{ (product.categoryName || 'THỜI TRANG NỮ').toLocaleUpperCase('vi') }}</div><h1>{{ product.name }}</h1>
           <p class="hqa-dim">Mã sản phẩm: {{ product.id }} · {{ currentStock > 0 ? `Còn ${currentStock} sản phẩm` : 'Hết hàng' }}</p>
           <div class="hqa-detail-price">{{ money(product.price) }} <span v-if="product.oldPrice>product.price" class="hqa-old-price">{{ money(product.oldPrice) }}</span></div>
           <p class="hqa-detail-description">{{ product.description }}</p>
-          <div class="hqa-detail-option"><strong>Màu sắc: {{ color }}</strong><div class="hqa-swatch-row"><button v-for="item in product.colors" :key="item" type="button" class="hqa-swatch" :class="{selected:color===item, 'is-out':!colorInStock(item)}" :aria-pressed="color===item" @click="pickColor(item)">{{ item }}</button></div></div>
+          <div class="hqa-detail-option"><strong>Màu sắc: {{ color }}</strong><div class="hqa-swatch-row"><button v-for="item in product.colors" :key="item" type="button" class="hqa-swatch" :class="{selected:color===item, 'is-out':!colorInStock(item), 'has-thumb':!!colorThumb(item)}" :aria-pressed="color===item" @click="pickColor(item)"><img v-if="colorThumb(item)" class="hqa-swatch-thumb" :src="colorThumb(item)" alt="" loading="lazy" />{{ item }}</button></div></div>
           <div class="hqa-detail-option"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><strong style="margin:0">Kích thước: {{ size }}</strong><button type="button" class="hqa-link-button" @click="openChart">Xem bảng size</button></div><div class="hqa-swatch-row" style="margin-top:11px"><button v-for="item in product.sizes" :key="item" type="button" class="hqa-swatch" :class="{selected:size===item, 'is-out':!sizeInStock(item)}" :aria-pressed="size===item" @click="pickSize(item)">{{ item }}</button></div></div>
           <button type="button" class="hqa-secondary" style="margin-top:16px" @click="showAdvisor=true">✧ Nhờ trợ lý tư vấn size phù hợp</button>
           <div class="hqa-buy-actions"><div class="hqa-qty" aria-label="Số lượng"><button type="button" aria-label="Giảm số lượng" :disabled="qty<=1" @click="qty--">−</button><span>{{ qty }}</span><button type="button" aria-label="Tăng số lượng" :disabled="qty>=currentStock" @click="qty++">+</button></div><button class="hqa-primary" type="button" :disabled="currentStock<=0" @click="add">Thêm vào giỏ hàng →</button></div>

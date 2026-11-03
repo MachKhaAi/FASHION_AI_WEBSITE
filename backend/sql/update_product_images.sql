@@ -1,9 +1,3 @@
--- Gắn ảnh cho 26 sản phẩm (sp1 -> sp26).
--- Ảnh nằm trong frontend/public/images/products/ (spN.jpg).
--- Chạy được nhiều lần.
---
---   psql -U postgres -d fashion_ai_db -f backend/sql/update_product_images.sql
-
 BEGIN;
 
 UPDATE products AS p
@@ -38,7 +32,6 @@ FROM (VALUES
 ) AS v(id, image)
 WHERE p.id = v.id;
 
--- Ảnh sp25 là chân váy jean dáng dài: sửa mô tả cho khớp
 UPDATE products
 SET description = 'Chân váy jean dáng dài tông xanh denim, dễ phối cùng sneaker hoặc sandal.'
 WHERE id = 'sp25';

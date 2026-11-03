@@ -42,6 +42,10 @@ export function normalizeProduct(p) {
     variants: Array.isArray(p.variants)
       ? p.variants.map(v => ({ size: v.size, color: v.color, stock: Number(v.stock ?? 0) }))
       : [],
+    // Thư viện ảnh theo màu: [{ url, color }] (color = null là ảnh chung)
+    images: Array.isArray(p.images)
+      ? p.images.filter(i => i && i.url).map(i => ({ url: i.url, color: i.color || null }))
+      : [],
     stock: Number(p.stock ?? 0),
     featured: Boolean(p.featured ?? p.is_featured),
     description: p.description ?? '',

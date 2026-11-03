@@ -5,12 +5,19 @@ const { requireAuth } = require('../middleware/authMiddleware');
 const router = express.Router();
 router.use(requireAuth);
 
-async function getCartData(userId) {
-  const sql = `
+// Ảnh hiển thị trong giỏ: ảnh đúng màu khách đã chọn (bảng product_images), nếu không có thì dùng ảnh chính
+const IMAGE_BY_COLOR = `COALESCE(
+        (SELECT pi.url FROM product_images pi
+         WHERE pi.product_id = ci.product_id AND pi.color = ci.color
+         ORDER BY pi.sort_order, pi.id LIMIT 1),
+        p.image)`;
+
+function cartSql(imageExpr) {
+  return `
     SELECT 
       ci.id AS cart_item_id, ci.product_id, ci.size, ci.color, ci.quantity,
       ci.is_ai_recommended, ci.ai_fit_note,
-      p.name AS product_name, p.price, p.old_price, p.image,
+      p.name AS product_name, p.price, p.old_price, ${imageExpr} AS image,
       COALESCE(pv.stock, 0) AS stock
     FROM cart_items ci
     JOIN products p ON p.id = ci.product_id
@@ -19,7 +26,16 @@ async function getCartData(userId) {
     WHERE ci.user_id = $1
     ORDER BY ci.created_at DESC, ci.id DESC
   `;
-  const result = await db.query(sql, [String(userId)]);
+}
+
+async function getCartData(userId) {
+  let result;
+  try {
+    result = await db.query(cartSql(IMAGE_BY_COLOR), [String(userId)]);
+  } catch (error) {
+    if (error.code !== '42P01') throw error; // bảng product_images chưa tạo -> dùng ảnh chính
+    result = await db.query(cartSql('p.image'), [String(userId)]);
+  }
   const items = result.rows.map((row) => {
     const price = Number(row.price) || 0;
     const quantity = Number(row.quantity) || 0;

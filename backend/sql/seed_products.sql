@@ -1,12 +1,3 @@
--- Dữ liệu mẫu sản phẩm cho cửa hàng HQA (database: fashion_ai_db)
--- Gồm 8 mẫu đang hiển thị ở trang chủ (sp4–sp11) và 15 mẫu bổ sung (sp12–sp26).
--- Chạy được nhiều lần: sản phẩm đã có sẽ được bỏ qua, biến thể đã có không bị thêm trùng.
---
---   psql -U postgres -d fashion_ai_db -f backend/sql/seed_products.sql
---
--- Ảnh minh họa nằm trong frontend/public/images/products/ (mỗi sản phẩm 1 file spN.jpg).
--- Khi có ảnh thật, chỉ cần đổi cột "image" (đường dẫn hoặc URL đầy đủ).
-
 BEGIN;
 
 INSERT INTO products (id, name, category_id, price, old_price, image, description, is_featured, created_at)

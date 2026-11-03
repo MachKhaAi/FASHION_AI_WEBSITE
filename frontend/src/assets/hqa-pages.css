@@ -1272,3 +1272,82 @@
         min-width: 0
     }
 }
+
+/* ===== Thư viện ảnh theo màu (trang chi tiết) ===== */
+.hqa-detail-media {
+    min-width: 0
+}
+
+.hqa-thumbs {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+    overflow-x: auto;
+    padding-bottom: 4px
+}
+
+.hqa-thumb {
+    flex: 0 0 auto;
+    width: 76px;
+    padding: 0;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+    overflow: hidden;
+    text-align: center;
+    font: inherit
+}
+
+.hqa-thumb img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 4/5;
+    object-fit: cover
+}
+
+.hqa-thumb span {
+    display: block;
+    padding: 3px 2px 4px;
+    font-size: 11px;
+    line-height: 1.2;
+    color: #806a6a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis
+}
+
+.hqa-thumb:hover {
+    border-color: #e7c3cc
+}
+
+.hqa-thumb.active {
+    border-color: #a65770
+}
+
+.hqa-thumb.active span {
+    color: #a65770;
+    font-weight: 650
+}
+
+/* Ô chọn màu có ảnh nhỏ */
+.hqa-swatch.has-thumb {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding-left: 5px
+}
+
+.hqa-swatch-thumb {
+    width: 30px;
+    height: 36px;
+    border-radius: 4px;
+    object-fit: cover;
+    flex: none
+}
+
+@media(max-width:560px) {
+    .hqa-thumb {
+        width: 64px
+    }
+}

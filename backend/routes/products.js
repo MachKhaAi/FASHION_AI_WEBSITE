@@ -60,7 +60,7 @@ function toList(value) {
 }
 
 // Ghép 1 dòng products + các biến thể thành object trả về cho frontend
-function shapeProduct(row, variants) {
+function shapeProduct(row, variants, images = []) {
   const list = variants.map((v) => ({ size: v.size, color: v.color, stock: Number(v.stock) || 0 }));
   return {
     id: row.id,
@@ -77,6 +77,8 @@ function shapeProduct(row, variants) {
     colors: unique(list.map((v) => v.color)),
     stock: list.reduce((sum, v) => sum + v.stock, 0),
     variants: list,
+    // Thư viện ảnh: [{ url, color }] ; color = null là ảnh chung của sản phẩm
+    images: images.length ? images : [{ url: row.image, color: null }],
   };
 }
 
@@ -99,6 +101,22 @@ async function loadVariants(productIds) {
     [productIds]
   );
   for (const v of result.rows) map.get(v.product_id)?.push(v);
+  return map;
+}
+
+// Ảnh của sản phẩm theo từng màu. Nếu bảng product_images chưa được tạo thì bỏ qua (chỉ dùng ảnh chính).
+async function loadImages(productIds) {
+  const map = new Map(productIds.map((id) => [id, []]));
+  if (!productIds.length) return map;
+  try {
+    const result = await db.query(
+      'SELECT product_id, color, url FROM product_images WHERE product_id = ANY($1::text[]) ORDER BY product_id, sort_order, id',
+      [productIds]
+    );
+    for (const r of result.rows) map.get(r.product_id)?.push({ url: r.url, color: r.color || null });
+  } catch (error) {
+    if (error.code !== '42P01') throw error; // 42P01 = bảng chưa tồn tại
+  }
   return map;
 }
 
@@ -228,8 +246,9 @@ router.get('/products', async (req, res) => {
       ORDER BY ${orderBy}`;
 
     const result = await db.query(sql, params);
-    const variants = await loadVariants(result.rows.map((r) => r.id));
-    const data = result.rows.map((row) => shapeProduct(row, variants.get(row.id) || []));
+    const ids = result.rows.map((r) => r.id);
+    const [variants, images] = await Promise.all([loadVariants(ids), loadImages(ids)]);
+    const data = result.rows.map((row) => shapeProduct(row, variants.get(row.id) || [], images.get(row.id) || []));
 
     res.json({ success: true, count: data.length, data });
   } catch (error) {
@@ -281,8 +300,9 @@ router.get('/products/:id', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm' });
     }
 
-    const variants = await loadVariants([result.rows[0].id]);
-    res.json({ success: true, data: shapeProduct(result.rows[0], variants.get(result.rows[0].id) || []) });
+    const id = result.rows[0].id;
+    const [variants, images] = await Promise.all([loadVariants([id]), loadImages([id])]);
+    res.json({ success: true, data: shapeProduct(result.rows[0], variants.get(id) || [], images.get(id) || []) });
   } catch (error) {
     serverError(res, 'Lỗi lấy chi tiết sản phẩm', error);
   }
