@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../config/db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
@@ -17,6 +17,29 @@ function signToken(user) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Số đo cơ thể (bảng body_measurements)
+// height, chest, waist, hip là INTEGER; weight là NUMERIC(5,2)
+// ---------------------------------------------------------------------------
+const MEASURE_RANGES = {
+  height: [100, 230],
+  weight: [20, 250],
+  chest: [50, 160],
+  waist: [40, 160],
+  hip: [50, 170],
+};
+const MEASURE_LABELS = {
+  height: 'Chiều cao',
+  weight: 'Cân nặng',
+  chest: 'Vòng ngực',
+  waist: 'Vòng eo',
+  hip: 'Vòng hông',
+};
+const INTEGER_MEASURES = ['height', 'chest', 'waist', 'hip'];
+
+// NUMERIC của Postgres trả về dạng chuỗi nên đổi lại thành số cho frontend
+const num = (v) => (v === null || v === undefined ? null : Number(v));
+
 function publicUser(user) {
   return {
     id: user.id,
@@ -24,12 +47,30 @@ function publicUser(user) {
     email: user.email,
     phone: user.phone || '',
     role: user.role,
+    address: user.address || '',
+    height: num(user.height),
+    weight: num(user.weight),
+    chest: num(user.chest),
+    waist: num(user.waist),
+    hip: num(user.hip),
   };
+}
+
+// Lấy người dùng kèm số đo (LEFT JOIN vì có người chưa có dòng trong body_measurements)
+async function getFullUser(id) {
+  const result = await db.query(
+    `SELECT u.id, u.full_name, u.email, u.phone, u.address, u.role,
+            bm.height, bm.weight, bm.chest, bm.waist, bm.hip
+     FROM users u
+     LEFT JOIN body_measurements bm ON bm.user_id = u.id
+     WHERE u.id = $1`,
+    [id]
+  );
+  return result.rows[0] || null;
 }
 
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
-  // Nhận tên ở nhiều dạng: full_name, fullName hoặc name
   const full_name = (req.body.full_name || req.body.fullName || req.body.name || '').trim();
   const email = (req.body.email || '').trim().toLowerCase();
   const password = req.body.password || '';
@@ -57,7 +98,7 @@ router.post('/register', async (req, res) => {
     const result = await db.query(
       `INSERT INTO users (full_name, email, password_hash, phone, role)
        VALUES ($1, $2, $3, $4, 'customer')
-       RETURNING id, full_name, email, phone, role`,
+       RETURNING id, full_name, email, phone, address, role`,
       [full_name, email, password_hash, phone]
     );
 
@@ -98,11 +139,14 @@ router.post('/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) return res.status(401).json(invalid);
 
+    // Lấy kèm số đo để frontend có đủ dữ liệu ngay sau khi đăng nhập
+    const full = (await getFullUser(user.id)) || user;
+
     res.json({
       success: true,
       message: 'Đăng nhập thành công!',
       token: signToken(user),
-      user: publicUser(user),
+      user: publicUser(full),
     });
   } catch (error) {
     console.error('Lỗi đăng nhập:', error.message);
@@ -110,50 +154,124 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// GET /api/auth/me  (cần token) - lấy lại thông tin người dùng khi tải lại trang
+// GET /api/auth/me (cần token) - lấy lại thông tin người dùng, địa chỉ và số đo
 router.get('/me', requireAuth, async (req, res) => {
   try {
-    const result = await db.query(
-      'SELECT id, full_name, email, phone, role FROM users WHERE id = $1',
-      [req.user.id]
-    );
-    if (result.rows.length === 0) {
+    const user = await getFullUser(req.user.id);
+    if (!user) {
       return res.status(404).json({ success: false, message: 'Tài khoản không còn tồn tại!' });
     }
-    res.json({ success: true, user: result.rows[0] });
+    res.json({ success: true, user: publicUser(user) });
   } catch (error) {
-    console.error('Lỗi lấy thông tin:', error.message);
+    console.error('Lỗi lấy thông tin (GET /me):', error.message);
     res.status(500).json({ success: false, message: 'Lỗi server' });
   }
 });
 
-// PUT /api/auth/profile (cần token) - cập nhật họ tên, số điện thoại của chính mình
+// PUT /api/auth/profile (cần token) - cập nhật họ tên, SĐT, địa chỉ và số đo cơ thể
+// Chỉ cập nhật những trường mà frontend có gửi lên; trường không gửi được giữ nguyên.
+// Gửi chuỗi rỗng hoặc null để xóa giá trị của trường đó.
 router.put('/profile', requireAuth, async (req, res) => {
-  const full_name = String(req.body.full_name || '').trim();
-  const phone = String(req.body.phone || '').replace(/\s/g, '');
+  const body = req.body || {};
 
-  if (full_name.length < 2) {
-    return res.status(400).json({ success: false, message: 'Họ tên phải có ít nhất 2 ký tự!' });
+  // ---------- 1. Kiểm tra dữ liệu gửi lên ----------
+  const userSets = [];
+  const userValues = [];
+  const addUser = (col, val) => {
+    userValues.push(val);
+    userSets.push(`${col} = $${userValues.length}`);
+  };
+
+  if (body.full_name !== undefined) {
+    const full_name = String(body.full_name).trim();
+    if (full_name.length < 2) {
+      return res.status(400).json({ success: false, message: 'Họ tên phải có ít nhất 2 ký tự!' });
+    }
+    addUser('full_name', full_name);
   }
-  if (phone && !/^0\d{9}$/.test(phone)) {
-    return res.status(400).json({ success: false, message: 'Số điện thoại phải gồm 10 chữ số và bắt đầu bằng 0!' });
+
+  if (body.phone !== undefined) {
+    const phone = String(body.phone || '').replace(/\s/g, '');
+    if (phone && !/^0\d{9}$/.test(phone)) {
+      return res.status(400).json({ success: false, message: 'Số điện thoại phải gồm 10 chữ số và bắt đầu bằng 0!' });
+    }
+    addUser('phone', phone || null);
+  }
+
+  if (body.address !== undefined) {
+    const address = String(body.address || '').trim();
+    if (address.length > 500) {
+      return res.status(400).json({ success: false, message: 'Địa chỉ quá dài (tối đa 500 ký tự)!' });
+    }
+    addUser('address', address || null);
+  }
+
+  const measures = {}; // chỉ chứa số đo mà frontend có gửi
+  for (const [col, [min, max]] of Object.entries(MEASURE_RANGES)) {
+    if (body[col] === undefined) continue;
+    if (body[col] === '' || body[col] === null) {
+      measures[col] = null;
+      continue;
+    }
+    const n = Number(body[col]);
+    if (!Number.isFinite(n) || n < min || n > max) {
+      return res.status(400).json({
+        success: false,
+        message: `${MEASURE_LABELS[col]} phải nằm trong khoảng ${min}–${max}!`,
+      });
+    }
+    // Cột INTEGER không nhận số lẻ (vd 85.5) nên phải làm tròn; weight giữ 1 chữ số thập phân
+    measures[col] = INTEGER_MEASURES.includes(col) ? Math.round(n) : Math.round(n * 10) / 10;
+  }
+
+  const measureCols = Object.keys(measures);
+  if (userSets.length === 0 && measureCols.length === 0) {
+    return res.status(400).json({ success: false, message: 'Không có thông tin nào để cập nhật!' });
   }
 
   try {
-    // Chỉ sửa tài khoản của người đang đăng nhập (id lấy từ token, không nhận từ client)
-    const result = await db.query(
-      `UPDATE users SET full_name = $1, phone = $2
-       WHERE id = $3
-       RETURNING id, full_name, email, phone, role`,
-      [full_name, phone || null, req.user.id]
-    );
-    if (result.rows.length === 0) {
+    // ---------- 2. Cập nhật bảng users (họ tên, SĐT, địa chỉ) ----------
+    if (userSets.length > 0) {
+      userValues.push(req.user.id);
+      const r = await db.query(
+        `UPDATE users SET ${userSets.join(', ')} WHERE id = $${userValues.length} RETURNING id`,
+        userValues
+      );
+      if (r.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'Tài khoản không còn tồn tại!' });
+      }
+    }
+
+    // ---------- 3. Upsert số đo vào body_measurements ----------
+    if (measureCols.length > 0) {
+      const cols = ['user_id', ...measureCols];
+      const params = [req.user.id, ...measureCols.map((c) => measures[c])];
+      const placeholders = params.map((_, i) => `$${i + 1}`);
+      const updates = measureCols.map((c) => `${c} = EXCLUDED.${c}`);
+      await db.query(
+        `INSERT INTO body_measurements (${cols.join(', ')}, updated_at)
+         VALUES (${placeholders.join(', ')}, CURRENT_TIMESTAMP)
+         ON CONFLICT (user_id)
+         DO UPDATE SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP`,
+        params
+      );
+    }
+
+    // ---------- 4. Đọc lại toàn bộ dữ liệu mới nhất để trả về ----------
+    const user = await getFullUser(req.user.id);
+    if (!user) {
       return res.status(404).json({ success: false, message: 'Tài khoản không còn tồn tại!' });
     }
-    res.json({ success: true, message: 'Cập nhật thông tin thành công!', user: publicUser(result.rows[0]) });
+    res.json({
+      success: true,
+      message: 'Cập nhật thông tin và số đo thành công!',
+      user: publicUser(user),
+    });
   } catch (error) {
-    console.error('Lỗi cập nhật hồ sơ:', error.message);
-    res.status(500).json({ success: false, message: 'Lỗi server' });
+    // In chi tiết lỗi ra terminal, server vẫn tiếp tục chạy
+    console.error('--- LỖI KHI CẬP NHẬT (PUT /profile) ---');
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Lỗi Database. Vui lòng kiểm tra log Terminal.' });
   }
 });
 

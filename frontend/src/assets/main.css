@@ -297,12 +297,21 @@ small {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   white-space: nowrap;
+  padding-bottom: 4px;
+  border-bottom: 3px solid transparent; /* Đặt sẵn viền trong suốt để menu không bị giật/nhảy khi có viền thật */
+  text-decoration: none;
 }
 
-.header nav a.active {
-  border-bottom: 3px solid var(--accent);
+.header nav a.active,
+.header nav a:hover {
+  border-bottom-color: var(--accent);
 }
 
+/* 2. Hiển thị thanh gạch (độ rộng = 100%) khi click (.active) hoặc khi rê chuột (:hover) */
+.header nav a.active::after,
+.header nav a:hover::after {
+  width: 100%;
+}
 .icons {
   display: flex;
   gap: 12px;
