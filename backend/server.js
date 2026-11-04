@@ -4,6 +4,8 @@ require('dotenv').config();
 const db = require('./config/db');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
+const adminCatalogRoutes = require('./routes/adminCatalog');
+const orderRoutes = require('./routes/orders');
 const productRoutes = require('./routes/products');
 const cartRoutes = require('./routes/cart');
 
@@ -20,6 +22,10 @@ app.use('/api', productRoutes);
 
 // Quản trị: /api/admin/login, /api/admin/me
 app.use('/api/admin', adminRoutes);
+// Quản trị sản phẩm / danh mục: /api/admin/products, /api/admin/categories
+app.use('/api/admin', adminCatalogRoutes);
+// Đơn hàng: POST /api/orders, GET /api/orders/mine, /api/admin/orders (admin)
+app.use('/api', orderRoutes);
 
 // Đăng ký / đăng nhập: /api/auth/register, /api/auth/login, /api/auth/me
 app.use('/api/auth', authRoutes);

@@ -1,5 +1,6 @@
 <!-- File: src/components/shop/ProductCard.vue -->
 <script setup>
+import { computed } from "vue";
 import { useRouter } from "vue-router";
 import HqaIcon from "../common/HqaIcon.vue";
 import { money } from "../../mocks/products";
@@ -10,6 +11,11 @@ const props = defineProps({ product: { type: Object, required: true } });
 const router = useRouter();
 const shop = useHqaShopStore();
 
+// Sản phẩm thật (trong database) tương ứng với thẻ này
+const realProduct = computed(() => shop.products.find((p) => p.name === props.product.name));
+// Hết hàng khi sản phẩm có trong database và tồn kho <= 0
+const soldOut = computed(() => !!realProduct.value && Number(realProduct.value.stock) <= 0);
+
 // Chuyển hướng đến trang chi tiết sản phẩm thực tế khi bấm vào hình hoặc tên
 function goToRealProduct() {
   router.push({ name: "hqa-products", query: { tim: props.product.name } });
@@ -18,22 +24,24 @@ function goToRealProduct() {
 // Mở hộp thoại chọn size thật
 function openRealProductDialog(event) {
   event.stopPropagation(); // Ngăn sự kiện click kích hoạt chuyển trang
-  
-  // Tìm sản phẩm thật trong store
-  const realProduct = shop.products.find(p => p.name === props.product.name);
 
-  if (!realProduct) {
-     alert("Sản phẩm chưa có dữ liệu chi tiết thực tế.");
-     return;
+  if (!realProduct.value) {
+    alert("Sản phẩm chưa có dữ liệu chi tiết thực tế.");
+    return;
   }
+  if (soldOut.value) {
+    alert("Sản phẩm này đã hết hàng.");
+    return;
+  }
+  const real = realProduct.value;
 
   // Dùng chung biến demo.dialog để trigger mở hộp thoại trên ShopLayout, nhưng nạp dữ liệu thật
   demo.dialog = {
-    title: realProduct.name,
-    text: money(realProduct.price),
-    product: realProduct, // Chứa thông tin biến thể thật
-    size: realProduct.sizes?.[0] || 'Một cỡ', // Size mặc định
-    color: realProduct.colors?.[0] || '', // Màu mặc định
+    title: real.name,
+    text: money(real.price),
+    product: real, // Chứa thông tin biến thể thật
+    size: real.sizes?.[0] || 'Một cỡ', // Size mặc định
+    color: real.colors?.[0] || '', // Màu mặc định
     type: 'real_add' // Cờ báo hiệu đây là form thêm hàng thật
   };
 }
@@ -54,10 +62,13 @@ function openRealProductDialog(event) {
         :src="product.image"
         :alt="product.name"
         loading="lazy"
+        :style="soldOut ? 'opacity:.55' : ''"
       />
       <span v-else>Ảnh {{ product.name }}</span>
-      <div class="labels" v-if="product.tag">
+      <div class="labels" v-if="soldOut || product.tag">
+        <span v-if="soldOut" class="tag dark">Hết hàng</span>
         <span
+          v-else
           :class="[
             'tag',
             {
@@ -82,14 +93,18 @@ function openRealProductDialog(event) {
         <button
           class="quick-size"
           :aria-label="`Chọn kích thước ${product.name}`"
+          :disabled="soldOut"
           @click.stop="openRealProductDialog"
         >
-          {{ product.id === 4 || product.id === 5 ? "—" : "M" }}
+          {{ soldOut ? "—" : product.id === 4 || product.id === 5 ? "—" : "M" }}
         </button>
         <!-- Nút thêm nhanh cũng hiển thị popup -->
-        <button class="quick-add" @click.stop="openRealProductDialog">
-          Chọn {{ product.id === 4 || product.id === 5 ? "mua" : "size" }} ·
-          Thêm nhanh
+        <button class="quick-add" :disabled="soldOut" @click.stop="openRealProductDialog">
+          <template v-if="soldOut">Đã hết hàng</template>
+          <template v-else>
+            Chọn {{ product.id === 4 || product.id === 5 ? "mua" : "size" }} ·
+            Thêm nhanh
+          </template>
         </button>
       </div>
     </div>
