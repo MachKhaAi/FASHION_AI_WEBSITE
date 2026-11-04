@@ -85,6 +85,12 @@ export const adminLogin = (credentials) =>
 
 export const adminMe = () => API.get('/admin/me')
 
+// ---------- Quản lý bảng size (admin) ----------
+export const adminGetSizeCharts = () => API.get('/admin/size-charts')
+export const adminCreateSizeChart = (payload) => API.post('/admin/size-charts', payload)
+export const adminUpdateSizeChart = (id, payload) => API.put(`/admin/size-charts/${id}`, payload)
+export const adminDeleteSizeChart = (id) => API.delete(`/admin/size-charts/${id}`)
+
 export const checkAiSize = (userData) =>
   API.post('/size-advisor', userData)
 

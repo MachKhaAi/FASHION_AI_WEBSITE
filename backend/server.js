@@ -4,8 +4,10 @@ require('dotenv').config();
 const db = require('./config/db');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
+const adminSizeChartRoutes = require('./routes/adminSizeCharts');
 const productRoutes = require('./routes/products');
 const cartRoutes = require('./routes/cart');
+const sizeAdvisorRoutes = require('./routes/sizeAdvisor');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -18,6 +20,10 @@ app.use(express.json());
 //           /api/products/:id/size-chart, /api/categories, /api/size-charts
 app.use('/api', productRoutes);
 
+// Quản lý bảng size (admin): /api/admin/size-charts
+// PHẢI đặt trước '/api/admin' bên dưới để không bị route admin chung chặn
+app.use('/api/admin/size-charts', adminSizeChartRoutes);
+
 // Quản trị: /api/admin/login, /api/admin/me
 app.use('/api/admin', adminRoutes);
 
@@ -27,6 +33,9 @@ app.use('/api/auth', authRoutes);
 app.use('/api', authRoutes);
 // Giỏ hàng
 app.use('/api/cart', cartRoutes);
+
+// AI Size Advisor (tư vấn size dựa trên bảng size_charts): POST /api/size-advisor
+app.use('/api', sizeAdvisorRoutes);
 
 // 1. API kiểm tra kết nối Database
 app.get('/api/test-db', async (req, res) => {
@@ -40,31 +49,6 @@ app.get('/api/test-db', async (req, res) => {
   } catch (error) {
     console.error('Lỗi kết nối DB:', error.message);
     res.status(500).json({ success: false, message: 'Lỗi kết nối cơ sở dữ liệu' });
-  }
-});
-
-// 2. API sản phẩm: xem routes/products.js
-
-// 3. API AI Size Advisor (Tư vấn size thông minh)
-app.post('/api/size-advisor', async (req, res) => {
-  const { height, weight, chest, waist, hip } = req.body;
-  try {
-    const queryText = `
-      SELECT size_code FROM size_charts
-      WHERE $1 BETWEEN height_min AND height_max
-        AND $2 BETWEEN weight_min AND weight_max
-      LIMIT 1;
-    `;
-    const result = await db.query(queryText, [height, weight]);
-
-    if (result.rows.length > 0) {
-      res.json({ success: true, recommended_size: result.rows[0].size_code });
-    } else {
-      res.json({ success: true, recommended_size: 'M', message: 'Gợi ý size tiêu chuẩn' });
-    }
-  } catch (error) {
-    console.error('Lỗi tính size AI:', error.message);
-    res.status(500).json({ success: false, message: 'Lỗi server khi tính toán size' });
   }
 });
 
