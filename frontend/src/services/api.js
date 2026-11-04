@@ -32,7 +32,7 @@ API.interceptors.request.use((config) => {
   if (url.startsWith('/admin')) {
     const token = readStorage(ADMIN_TOKEN_KEY)
     if (token) config.headers.Authorization = `Bearer ${token}`
-  } else if (url.startsWith('/auth') || url.startsWith('/cart')) {
+  } else if (url.startsWith('/auth') || url.startsWith('/cart') || url.startsWith('/orders')) {
     const token = readStorage(USER_TOKEN_KEY)
     if (token) config.headers.Authorization = `Bearer ${token}`
   }
@@ -64,6 +64,9 @@ export const getProductFilters = () => API.get('/products/filters')
 
 export const getCategories = () => API.get('/categories')
 
+// Bảng size của cửa hàng
+export const getSizeCharts = () => API.get('/size-charts')
+
 export const loginUser = (credentials) =>
   API.post('/login', credentials)
 
@@ -84,6 +87,21 @@ export const adminLogin = (credentials) =>
   API.post('/admin/login', credentials)
 
 export const adminMe = () => API.get('/admin/me')
+
+// Quản trị sản phẩm / danh mục (tự gắn token admin vì đường dẫn bắt đầu bằng /admin)
+export const adminCreateProduct = (payload) => API.post('/admin/products', payload)
+export const adminUpdateProduct = (id, payload) => API.put(`/admin/products/${encodeURIComponent(id)}`, payload)
+export const adminDeleteProduct = (id) => API.delete(`/admin/products/${encodeURIComponent(id)}`)
+export const adminCreateCategory = (payload) => API.post('/admin/categories', payload)
+export const adminDeleteCategory = (id) => API.delete(`/admin/categories/${encodeURIComponent(id)}`)
+export const adminUpdateSizeCharts = (rows) => API.put('/admin/size-charts', { rows })
+
+// ---------- Đơn hàng ----------
+export const createOrder = (payload) => API.post('/orders', payload)
+export const getMyOrders = () => API.get('/orders/mine')
+export const cancelMyOrder = (id) => API.put(`/orders/${encodeURIComponent(id)}/cancel`)
+export const adminGetOrders = () => API.get('/admin/orders')
+export const adminSetOrderStatus = (id, status) => API.put(`/admin/orders/${encodeURIComponent(id)}/status`, { status })
 
 export const checkAiSize = (userData) =>
   API.post('/size-advisor', userData)

@@ -328,7 +328,7 @@ onBeforeUnmount(() => {
         </button>
 
         <RouterLink
-          v-if="admin.isAuthenticated"
+          v-if="false"
           aria-label="Trang quản trị"
           title="Trang quản trị"
           class="ib desktop-only"
@@ -387,7 +387,7 @@ onBeforeUnmount(() => {
       <a href="#chat">Tư vấn size</a>
       <a href="#login">Tài khoản</a>
 
-      <RouterLink v-if="admin.isAuthenticated" to="/admin">
+      <RouterLink v-if="false" to="/admin">
         Admin
       </RouterLink>
     </nav>
@@ -448,7 +448,7 @@ onBeforeUnmount(() => {
         <small>© 2026 HQA</small>
         <small>Thanh toán: Visa · MoMo · VietQR · COD</small>
         <RouterLink
-          v-if="admin.isAuthenticated"
+          v-if="false"
           to="/admin"
           style="display: inline; font-size: 12px; margin: 0; opacity: 0.7"
         >

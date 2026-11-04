@@ -7,15 +7,17 @@ const props = defineProps({ product: { type: Object, required: true } })
 const shop = useHqaShopStore()
 const categoryName = computed(() => props.product.categoryName || shop.categories.find(x => x.id === props.product.categoryId)?.name || 'Thời trang')
 const discount = computed(() => props.product.oldPrice > props.product.price ? Math.round((props.product.oldPrice - props.product.price) / props.product.oldPrice * 100) : 0)
+const soldOut = computed(() => Number(props.product.stock) <= 0)
 </script>
 <template>
   <article class="hqa-product-card">
     <div class="hqa-product-image">
       <router-link :to="`/san-pham/${product.id}`" :aria-label="`Xem ${product.name}`">
         <span class="hqa-image-fallback">HQA</span>
-        <img :src="product.image" :alt="product.name" loading="lazy" @error="e => e.target.style.opacity = '0'" />
+        <img :src="product.image" :alt="product.name" loading="lazy" :style="soldOut ? 'opacity:.55' : ''" @error="e => e.target.style.opacity = '0'" />
       </router-link>
-      <span v-if="discount" class="hqa-sale-badge">-{{ discount }}%</span>
+      <span v-if="soldOut" class="hqa-sale-badge" style="background:#4c3334;color:#fff">Hết hàng</span>
+      <span v-else-if="discount" class="hqa-sale-badge">-{{ discount }}%</span>
       <button class="hqa-heart" :class="{ 'is-favorite': shop.favorites.includes(product.id) }" type="button"
         :aria-label="shop.favorites.includes(product.id) ? 'Bỏ khỏi yêu thích' : 'Thêm vào yêu thích'"
         :title="shop.favorites.includes(product.id) ? 'Bỏ yêu thích' : 'Yêu thích'"
