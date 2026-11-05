@@ -1,4 +1,3 @@
-<!-- File: src/layouts/ShopLayout.vue -->
 <script setup>
 import {
   computed,
@@ -31,8 +30,34 @@ const newsletterStatus = ref(
   "Chúng mình không gửi spam. Hủy bất cứ lúc nào."
 );
 
-// Số lượng sản phẩm thực tế trong giỏ hàng
-const cartCount = computed(() => (hasUserToken() ? shop.cartCount : 0));
+// Trạng thái đăng nhập dạng reactive.
+// hasUserToken() đọc localStorage nên Vue không tự biết khi token thay đổi
+const loggedIn = ref(hasUserToken());
+function syncAuth() {
+  const now = hasUserToken();
+  const justLoggedIn = now && !loggedIn.value;
+  loggedIn.value = now;
+  if (justLoggedIn) shop.fetchCart();
+}
+
+// Số lượng sản phẩm trong giỏ: chưa đăng nhập / đã đăng xuất thì hiện 0
+const cartCount = computed(() => (loggedIn.value ? shop.cartCount : 0));
+
+// Hiệu ứng + thông báo khi thêm vào giỏ
+const toast = ref({ show: false, text: "" });
+const badgeBump = ref(0); // đổi giá trị để chạy lại hiệu ứng nảy của biểu tượng giỏ
+let toastTimer = null;
+function showToast(text) {
+  toast.value = { show: true, text };
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.value.show = false;
+  }, 2200);
+}
+
+// Cập nhật khi đổi trang, khi store thay đổi người dùng, hoặc token đổi ở tab khác
+watch(() => route.fullPath, syncAuth);
+watch(() => shop.viewer, syncAuth);
 
 // Cuộn đến một khu vực trên trang
 function scrollToSection(id) {
@@ -203,8 +228,9 @@ function escape(event) {
   }
 }
 
-// Hàm xử lý thêm vào giỏ hàng thật từ popup trên trang chủ
-async function handleRealAddToCart() {
+// Hàm xử lý thêm vào giỏ hàng từ popup trên trang chủ
+// Lưu ý: shop.addToCart (hqaShop.js) là hàm đồng bộ, trả về true/false
+function handleRealAddToCart() {
   if (!hasUserToken()) {
     alert("Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng!");
     demo.dialog = null;
@@ -212,10 +238,11 @@ async function handleRealAddToCart() {
     return;
   }
 
+  const payload = demo.dialog;
+  if (!payload?.product) return;
+
   isAddingToCart.value = true;
   try {
-    const payload = demo.dialog;
-
     // Kiểm tra tồn kho của lựa chọn
     const variant = payload.product.variants?.find(
       (v) => v.size === payload.size && v.color === payload.color
@@ -225,26 +252,28 @@ async function handleRealAddToCart() {
       alert(
         `Lựa chọn Size ${payload.size} - Màu ${payload.color} hiện đang hết hàng.`
       );
-      isAddingToCart.value = false;
       return;
     }
 
-    const result = await shop.addToCart(
+    const added = shop.addToCart(
       payload.product.id,
       payload.size,
-      payload.color, // Lấy màu người dùng chọn ở popup
+      payload.color, // Màu người dùng chọn ở popup
       1
     );
 
-    if (result.ok) {
-      alert(result.message || "Đã thêm sản phẩm vào giỏ hàng!");
+    if (added) {
       demo.dialog = null; // Đóng form khi thành công
+      badgeBump.value++; // chạy hiệu ứng nảy ở biểu tượng giỏ
+      showToast("Đã thêm sản phẩm vào giỏ hàng");
     } else {
-      alert(result.message || "Có lỗi xảy ra khi thêm vào giỏ hàng.");
+      alert(
+        "Không thể thêm vào giỏ hàng: sản phẩm không đủ hàng hoặc lựa chọn không hợp lệ."
+      );
     }
   } catch (error) {
     console.error("Lỗi thêm nhanh:", error);
-    alert("Lỗi kết nối máy chủ.");
+    alert("Có lỗi xảy ra khi thêm vào giỏ hàng.");
   } finally {
     isAddingToCart.value = false;
   }
@@ -261,10 +290,15 @@ onMounted(() => {
   }
 
   window.addEventListener("keydown", escape);
+  window.addEventListener("storage", syncAuth);
+  window.addEventListener("focus", syncAuth);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", escape);
+  window.removeEventListener("storage", syncAuth);
+  window.removeEventListener("focus", syncAuth);
+  clearTimeout(toastTimer);
 });
 </script>
 
@@ -361,7 +395,7 @@ onBeforeUnmount(() => {
             <path d="M5 7h14l1 14H4L5 7Z"></path>
             <path d="M8 8V6a4 4 0 0 1 8 0v2"></path>
           </svg>
-          <span class="badge">{{ cartCount }}</span>
+          <span :key="badgeBump" class="badge" :class="{ bump: badgeBump > 0 }">{{ cartCount }}</span>
         </a>
       </div>
     </header>
@@ -572,4 +606,68 @@ onBeforeUnmount(() => {
       </div>
     </template>
   </dialog>
+
+  <!-- Thông báo thêm vào giỏ hàng -->
+  <Transition name="cart-toast">
+    <div v-if="toast.show" class="cart-toast" role="status" aria-live="polite">
+      <svg aria-hidden="true" class="cart-toast-icon" viewBox="0 0 24 24">
+        <path d="M5 12.5l4.5 4.5L19 7.5"></path>
+      </svg>
+      <span>{{ toast.text }}</span>
+    </div>
+  </Transition>
 </template>
+
+<style scoped>
+.cart-toast {
+  position: fixed;
+  top: 84px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-radius: 999px;
+  background: #5c4a42;
+  color: #fff;
+  font-size: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+.cart-toast-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  fill: none;
+  stroke: #9be3b0;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.cart-toast-enter-active,
+.cart-toast-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.cart-toast-enter-from,
+.cart-toast-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+.badge.bump {
+  animation: badge-bump 0.45s ease;
+}
+@keyframes badge-bump {
+  0% { scale: 1; }
+  40% { scale: 1.6; }
+  100% { scale: 1; }
+}
+@media (max-width: 600px) {
+  .cart-toast {
+    top: auto;
+    bottom: 90px;
+    left: 16px;
+    right: 16px;
+    justify-content: center;
+  }
+}
+</style>

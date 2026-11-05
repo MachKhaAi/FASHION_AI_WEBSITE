@@ -88,6 +88,11 @@ export const adminLogin = (credentials) =>
 
 export const adminMe = () => API.get('/admin/me')
 
+// ---------- Quản lý bảng size (admin) ----------
+export const adminGetSizeCharts = () => API.get('/admin/size-charts')
+export const adminCreateSizeChart = (payload) => API.post('/admin/size-charts', payload)
+export const adminUpdateSizeChart = (id, payload) => API.put(`/admin/size-charts/${id}`, payload)
+export const adminDeleteSizeChart = (id) => API.delete(`/admin/size-charts/${id}`)
 // Quản trị sản phẩm / danh mục (tự gắn token admin vì đường dẫn bắt đầu bằng /admin)
 export const adminCreateProduct = (payload) => API.post('/admin/products', payload)
 export const adminUpdateProduct = (id, payload) => API.put(`/admin/products/${encodeURIComponent(id)}`, payload)
