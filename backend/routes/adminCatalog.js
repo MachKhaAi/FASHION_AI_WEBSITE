@@ -38,6 +38,18 @@ function cleanColorImages(value) {
   return out;
 }
 
+// { "Xanh nhạt": { "S": 3, "M": 5 } } -> số lượng từng (màu, size); không hợp lệ thì trả về null
+function cleanMatrix(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const out = {};
+  for (const [color, row] of Object.entries(value)) {
+    if (!row || typeof row !== 'object') continue;
+    out[String(color).trim()] = {};
+    for (const [size, qty] of Object.entries(row)) out[String(color).trim()][String(size).trim()] = Math.min(toInt(qty), 100000);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 function clean(body) {
   const name = String(body.name || '').trim().slice(0, 200);
   const categoryId = String(body.categoryId || '').trim();
@@ -54,6 +66,7 @@ function clean(body) {
     colors: toList(body.colors, ['Kem']),
     stock: toInt(body.stock),
     colorImages: cleanColorImages(body.colorImages),
+    matrix: cleanMatrix(body.stockMatrix),
   };
 }
 
@@ -63,8 +76,9 @@ function spread(total, count) {
   return Array.from({ length: count }, (_, i) => base + (i === 0 ? total - base * count : 0));
 }
 
-// Đồng bộ bảng product_variants theo size x màu mà admin chọn
-async function syncVariants(id, sizes, colors, totalStock) {
+// Đồng bộ bảng product_variants theo size x màu mà admin chọn.
+// Có matrix: mỗi ô (màu, size) lấy đúng số lượng admin nhập. Không có matrix: chia đều tổng tồn kho.
+async function syncVariants(id, sizes, colors, totalStock, matrix) {
   const wanted = [];
   for (const size of sizes) for (const color of colors) wanted.push({ size, color });
 
@@ -76,15 +90,23 @@ async function syncVariants(id, sizes, colors, totalStock) {
   for (const v of existing) {
     if (!wantedKeys.has(key(v))) await db.query('DELETE FROM product_variants WHERE id = $1', [v.id]);
   }
-  // Thêm biến thể mới (tồn kho 0, sẽ chia lại bên dưới nếu cần)
+  // Thêm biến thể mới (tồn kho 0, sẽ đặt lại bên dưới)
   const have = new Set(existing.map(key));
   for (const v of wanted) {
     if (!have.has(key(v))) {
       await db.query('INSERT INTO product_variants (product_id, size, color, stock) VALUES ($1,$2,$3,0)', [id, v.size, v.color]);
     }
   }
+  const now = (await db.query('SELECT id, size, color, stock FROM product_variants WHERE product_id = $1 ORDER BY id', [id])).rows;
+
+  if (matrix) {
+    for (const v of now) {
+      const qty = toInt(matrix[v.color]?.[v.size]);
+      if (qty !== Number(v.stock)) await db.query('UPDATE product_variants SET stock = $2 WHERE id = $1', [v.id, qty]);
+    }
+    return;
+  }
   // Chỉ chia lại tồn kho khi tổng thay đổi
-  const now = (await db.query('SELECT id, stock FROM product_variants WHERE product_id = $1 ORDER BY id', [id])).rows;
   const current = now.reduce((sum, v) => sum + Number(v.stock), 0);
   if (current !== totalStock && now.length) {
     const parts = spread(totalStock, now.length);
@@ -139,7 +161,7 @@ router.post('/products', requireAdmin, async (req, res) => {
       [id, p.name, p.categoryId, p.price, p.oldPrice, p.image, p.description, p.featured]
     );
     try {
-      await syncVariants(id, p.sizes, p.colors, p.stock);
+      await syncVariants(id, p.sizes, p.colors, p.stock, p.matrix);
       await syncColorImages(id, p.colors, p.colorImages);
     } catch (error) {
       await optionalDelete('DELETE FROM product_images WHERE product_id = $1', [id]).catch(() => {});
@@ -169,7 +191,7 @@ router.put('/products/:id', requireAdmin, async (req, res) => {
       [id, p.name, p.categoryId, p.price, p.oldPrice, p.image, p.description, p.featured]
     );
     if (!result.rowCount) return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm!' });
-    await syncVariants(id, p.sizes, p.colors, p.stock);
+    await syncVariants(id, p.sizes, p.colors, p.stock, p.matrix);
     await syncColorImages(id, p.colors, p.colorImages);
     res.json({ success: true });
   } catch (error) {
