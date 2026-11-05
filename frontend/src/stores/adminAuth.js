@@ -41,8 +41,11 @@ export const useAdminAuthStore = defineStore('adminAuth', {
       try {
         const { data } = await adminMe()
         this.admin = data.user
-      } catch {
-        this.logout()
+      } catch (error) {
+        const code = error?.response?.status
+        // Chỉ đăng xuất khi máy chủ nói token sai/hết hạn. Lỗi mạng/timeout thì giữ token, thử lại sau.
+        if (code === 401 || code === 403 || code === 404) this.logout()
+        else { this.checked = false; return false }
       }
       this.checked = true
       return this.isAuthenticated
@@ -56,3 +59,15 @@ export const useAdminAuthStore = defineStore('adminAuth', {
     },
   },
 })
+
+// Đồng bộ giữa các tab: đăng nhập/đăng xuất admin ở tab này thì tab khác tự cập nhật
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== ADMIN_TOKEN_KEY) return
+    const store = useAdminAuthStore()
+    store.token = event.newValue || ''
+    store.admin = null
+    store.checked = false
+    if (store.token) store.restore()
+  })
+}

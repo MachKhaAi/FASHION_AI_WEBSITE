@@ -131,7 +131,6 @@ watch(() => route.query, (next) => {
 onMounted(async () => {
   load()
   // Danh mục + size + khoảng giá cho bộ lọc, và nạp cả catalog vào store (giỏ hàng, yêu thích)
-  shop.fetchCategories()
   shop.fetchProducts().catch(() => {})
   try {
     const response = await getProductFilters()
