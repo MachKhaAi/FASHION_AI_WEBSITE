@@ -231,6 +231,14 @@ export const useHqaShopStore = defineStore('hqaShop', {
     },
     // Tên cũ, giữ lại để các trang gọi shop.fetchProducts() vẫn chạy
     fetchProducts() { return this.fetchCatalog() },
+    // Thêm/cập nhật 1 sản phẩm vừa tải từ API vào store (trang chi tiết dùng khi khách vào thẳng đường dẫn)
+    upsertProduct(raw) {
+      const product = normalizeProduct(raw)
+      const index = this.products.findIndex(p => p.id === product.id)
+      if (index >= 0) this.products.splice(index, 1, product)
+      else this.products.push(product)
+      return this.products.find(p => p.id === product.id)
+    },
     // Cập nhật giao diện ngay, gửi lên máy chủ ở nền; lỗi thì tải lại từ DB cho đúng.
     async syncOrRevert(request, reload = false) {
       try {

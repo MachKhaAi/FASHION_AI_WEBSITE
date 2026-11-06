@@ -10,6 +10,7 @@ const orderRoutes = require('./routes/orders');
 const productRoutes = require('./routes/products');
 const cartRoutes = require('./routes/cart');
 const sizeAdvisorRoutes = require('./routes/sizeAdvisor');
+const sizeChatRoutes = require('./routes/sizeChat');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -42,6 +43,9 @@ app.use('/api/cart', cartRoutes);
 
 // AI Size Advisor (tư vấn size dựa trên bảng size_charts): POST /api/size-advisor
 app.use('/api', sizeAdvisorRoutes);
+
+// Chat tư vấn size bằng tiếng Việt: POST /api/size-chat
+app.use('/api', sizeChatRoutes);
 
 // 1. API kiểm tra kết nối Database
 app.get('/api/test-db', async (req, res) => {

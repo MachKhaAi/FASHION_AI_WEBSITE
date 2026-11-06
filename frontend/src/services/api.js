@@ -32,7 +32,7 @@ API.interceptors.request.use((config) => {
   if (url.startsWith('/admin')) {
     const token = readStorage(ADMIN_TOKEN_KEY)
     if (token) config.headers.Authorization = `Bearer ${token}`
-  } else if (url.startsWith('/auth') || url.startsWith('/cart') || url.startsWith('/orders')) {
+  } else if (url.startsWith('/auth') || url.startsWith('/cart') || url.startsWith('/orders') || url.startsWith('/size-chat')) {
     const token = readStorage(USER_TOKEN_KEY)
     if (token) config.headers.Authorization = `Bearer ${token}`
   }
@@ -110,6 +110,10 @@ export const adminSetOrderStatus = (id, status) => API.put(`/admin/orders/${enco
 
 export const checkAiSize = (userData) =>
   API.post('/size-advisor', userData)
+
+// Chat tư vấn size bằng tiếng Việt. state là trạng thái hội thoại do server trả về ở lượt trước.
+export const sendSizeChat = (message, state) =>
+  API.post('/size-chat', { message, state })
 
 export const testDatabase = () => API.get('/test-db')
 

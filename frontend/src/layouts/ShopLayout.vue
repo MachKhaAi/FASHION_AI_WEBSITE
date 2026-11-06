@@ -9,12 +9,20 @@ import {
 } from "vue";
 import { RouterView, RouterLink, useRouter, useRoute } from "vue-router";
 import HqaIcon from "../components/common/HqaIcon.vue";
+import HqaSizeChat from "../components/chatbot/HqaSizeChat.vue";
+import { useHqaChatStore } from "../stores/hqaChat";
 import { useAdminAuthStore } from "../stores/adminAuth";
 import { demo, message, showFavorites } from "../stores/hqaDemo";
 import { useHqaShopStore, hasUserToken } from "../stores/hqaShop";
 
 const router = useRouter();
 const route = useRoute();
+const chat = useHqaChatStore();
+// Trang /tu-van-size hiển thị khung chat ngay trong trang nên không cần khung nổi
+const isChatPage = computed(() => route.path === "/tu-van-size");
+watch(isChatPage, (v) => {
+  if (v) chat.close();
+});
 const admin = useAdminAuthStore();
 const shop = useHqaShopStore();
 
@@ -179,9 +187,14 @@ function handleClick(event) {
     return;
   }
 
+  // Mở khung chat tư vấn size
+  if (href === "#chat") {
+    chat.openChat();
+    return;
+  }
+
   // Điều hướng các trang khác
   const routes = {
-    "#chat": "/tu-van-size",
     "#login": hasUserToken() ? "/thong-tin-ca-nhan" : "/dang-nhap",
     "#profile": "/thong-tin-ca-nhan",
   };
@@ -528,13 +541,16 @@ onBeforeUnmount(() => {
     </nav>
 
     <!-- Nút chatbot -->
-    <div class="floating-chat">
+    <div v-show="!chat.open && !isChatPage" class="floating-chat">
       <a class="btn" href="#chat">
         <HqaIcon name="chat" />
         Tư vấn size
       </a>
     </div>
   </div>
+
+  <!-- Khung chat tư vấn size -->
+  <HqaSizeChat v-if="!isChatPage" />
 
   <dialog
     ref="dialogElement"

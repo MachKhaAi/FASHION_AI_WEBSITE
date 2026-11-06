@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useHqaShopStore, normalizeProduct, hasUserToken } from '../../stores/hqaShop'
 import { getProductById, getProducts, getProductSizeChart } from '../../services/api'
 import { money } from '../../data/hqaCatalog'
-import HqaSizeAdvisor from '../../components/chatbot/HqaSizeAdvisor.vue'
+import { useHqaChatStore } from '../../stores/hqaChat'
 import HqaProductCard from '../../components/shop/HqaProductCard.vue'
 import '../../assets/hqa-pages.css'
 
@@ -14,11 +14,12 @@ const product = ref(null)
 const loading = ref(false)
 const loadError = ref('') 
 const related = ref([])
-const size = ref(''), color = ref(''), qty = ref(1), notice = ref(''), showChart = ref(false), showAdvisor = ref(false)
+const size = ref(''), color = ref(''), qty = ref(1), notice = ref(''), showChart = ref(false)
 const chart = reactive({ productId: '', rows: [], loading: false, error: '', message: '' })
 
 // Cờ đánh dấu sản phẩm được thêm vào giỏ nhờ AI tư vấn size
 const isAiRecommended = ref(false)
+const chat = useHqaChatStore()
 
 // ---------- Thư viện ảnh theo màu ----------
 const activeIndex = ref(0)
@@ -62,7 +63,6 @@ function pickSize(s) {
 function pickAiSize(s) {
   pickSize(s)
   isAiRecommended.value = true // Bật cờ AI tư vấn
-  showAdvisor.value = false
 }
 
 function pickColor(c) {
@@ -128,6 +128,18 @@ async function loadRelated(p, token) {
     related.value = []
   }
 }
+
+// Khách bấm "Chọn size X" trong khung chat: áp dụng size đó cho sản phẩm đang xem
+function applyChatSelection() {
+  const sel = chat.selection
+  const p = product.value
+  if (!sel || !p || sel.productId !== p.id) return
+  chat.consumeSelection()
+  if (Date.now() - sel.at > 5 * 60 * 1000 || !p.sizes.includes(sel.size)) return
+  pickAiSize(sel.size)
+  notice.value = `Đã chọn size ${sel.size} theo gợi ý của trợ lý ♡`
+}
+watch([() => chat.selection, product], applyChatSelection, { flush: 'post' })
 
 watch(() => route.params.id, (id) => { if (id) loadProduct(String(id)) }, { immediate: true })
 
@@ -202,7 +214,7 @@ async function add() {
           <p class="hqa-detail-description">{{ product.description }}</p>
           <div class="hqa-detail-option"><strong>Màu sắc: {{ color }}</strong><div class="hqa-swatch-row"><button v-for="item in product.colors" :key="item" type="button" class="hqa-swatch" :class="{selected:color===item, 'is-out':!colorInStock(item), 'has-thumb':!!colorThumb(item)}" :aria-pressed="color===item" @click="pickColor(item)"><img v-if="colorThumb(item)" class="hqa-swatch-thumb" :src="colorThumb(item)" alt="" loading="lazy" />{{ item }}</button></div></div>
           <div class="hqa-detail-option"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><strong style="margin:0">Kích thước: {{ size }}</strong><button type="button" class="hqa-link-button" @click="openChart">Xem bảng size</button></div><div class="hqa-swatch-row" style="margin-top:11px"><button v-for="item in product.sizes" :key="item" type="button" class="hqa-swatch" :class="{selected:size===item, 'is-out':!sizeInStock(item)}" :aria-pressed="size===item" @click="pickSize(item)">{{ item }}</button></div></div>
-          <button type="button" class="hqa-secondary" style="margin-top:16px" @click="showAdvisor=true">✧ Nhờ trợ lý tư vấn size phù hợp</button>
+          <button type="button" class="hqa-secondary" style="margin-top:16px" @click="chat.openChat({ product })">✧ Chat với trợ lý tư vấn size</button>
           <div class="hqa-buy-actions"><div class="hqa-qty" aria-label="Số lượng"><button type="button" aria-label="Giảm số lượng" :disabled="qty<=1" @click="qty--">−</button><span>{{ qty }}</span><button type="button" aria-label="Tăng số lượng" :disabled="qty>=currentStock" @click="qty++">+</button></div><button class="hqa-primary" type="button" :disabled="currentStock<=0" @click="add">Thêm vào giỏ hàng →</button></div>
           <div v-if="notice" :class="['hqa-alert', notice.startsWith('Đã') ? 'hqa-success' : '']" role="status">{{ notice }} <router-link v-if="notice.startsWith('Đã')" to="/gio-hang" style="text-decoration:underline">Xem giỏ hàng</router-link></div>
           <button type="button" class="hqa-link-button" @click="shop.toggleFavorite(product.id)">{{ shop.favorites.includes(product.id) ? '♥ Đã lưu yêu thích' : '♡ Thêm vào yêu thích' }}</button>
@@ -221,7 +233,6 @@ async function add() {
           <p class="hqa-dim" style="margin-top:10px">Dòng được tô nền là size bạn đang chọn.</p>
         </template>
         <button class="hqa-primary" style="margin-top:19px" @click="showChart=false">Đã hiểu</button></div></div>
-      <div v-if="showAdvisor" class="hqa-modal-backdrop" @click.self="showAdvisor=false"><div class="hqa-modal" style="padding:0" role="dialog" aria-modal="true" aria-label="Tư vấn size"><div style="padding:12px 14px;background:#fff;display:flex;justify-content:flex-end"><button class="hqa-close" type="button" aria-label="Đóng" @click="showAdvisor=false">×</button></div><HqaSizeAdvisor :product="product" @choose-size="pickAiSize($event)" /></div></div>
     </template>
     <div v-else-if="loadError==='error'" class="hqa-empty"><h1>Không thể tải sản phẩm</h1><p class="hqa-dim">Vui lòng kiểm tra kết nối rồi thử lại.</p><button class="hqa-primary" @click="loadProduct(String(route.params.id))">Thử lại</button></div>
     <div v-else class="hqa-empty"><h1>Không tìm thấy sản phẩm</h1><button class="hqa-primary" @click="router.push('/san-pham')">Quay về cửa hàng</button></div>
