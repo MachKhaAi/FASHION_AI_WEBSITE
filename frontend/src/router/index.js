@@ -18,6 +18,7 @@ import AdminProductView from "../views/admin/AdminProductView.vue";
 import AdminCategoryView from "../views/admin/AdminCategoryView.vue";
 import AdminSizeChartView from "../views/admin/AdminSizeChartView.vue";
 import { useAdminAuthStore } from "../stores/adminAuth";
+import { getUserToken } from "../services/api";
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -61,6 +62,28 @@ const router = createRouter({
   scrollBehavior() {
     return { top: 0 };
   },
+});
+
+// Giữ trang khách đang xem khi chuyển sang đăng nhập hoặc đăng ký.
+// Ưu tiên redirect có sẵn (ví dụ: giỏ hàng, yêu thích, chi tiết sản phẩm).
+router.beforeEach((to, from) => {
+  if (to.name === "hqa-checkout" && !getUserToken()) {
+    return { name: "login", query: { redirect: to.fullPath } };
+  }
+
+  const authPages = ["login", "register"];
+  if (!authPages.includes(to.name) || to.query.redirect !== undefined) return;
+
+  let redirect;
+  if (authPages.includes(from.name)) {
+    // Giữ đích nếu khách chuyển qua lại giữa đăng nhập và đăng ký.
+    redirect = typeof from.query.redirect === "string" ? from.query.redirect : undefined;
+  } else if (from.matched.length && from.name !== "admin-login" &&
+      !from.matched.some(record => record.meta.requiresAdmin)) {
+    redirect = from.fullPath;
+  }
+
+  if (redirect) return { name: to.name, query: { ...to.query, redirect }, hash: to.hash };
 });
 
 // Chặn khu vực /admin nếu chưa đăng nhập bằng tài khoản admin

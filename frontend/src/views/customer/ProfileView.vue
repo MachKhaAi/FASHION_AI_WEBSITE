@@ -35,9 +35,11 @@ function goLogin() {
 }
 
 async function load() {
-  if (getUserToken()) {
+  const token = getUserToken()
+  if (token) {
     try {
       const { data } = await getMyProfile()
+      if (getUserToken() !== token) return
       form.value = { name: data.user.full_name, email: data.user.email, phone: data.user.phone || '' }
       shop.setViewer({ name: data.user.full_name, email: data.user.email, phone: data.user.phone })
     } catch (err) {
@@ -45,8 +47,6 @@ async function load() {
       error.value = err.response?.data?.message || 'Không thể kết nối máy chủ.'
     }
     shop.fetchMyOrders()
-  } else if (shop.viewer) {
-    form.value = { name: shop.viewer.name, email: shop.viewer.email, phone: shop.viewer.phone || '' }
   } else {
     goLogin()
   }
@@ -61,12 +61,12 @@ async function save() {
     return
   }
   saving.value = true
+  const token = getUserToken()
   try {
-    if (getUserToken()) {
+    if (token) {
       const { data } = await updateMyProfile({ full_name: form.value.name, phone: form.value.phone })
+      if (getUserToken() !== token) return
       shop.setViewer({ name: data.user.full_name, email: data.user.email, phone: data.user.phone })
-    } else {
-      shop.setViewer({ name: form.value.name, email: form.value.email, phone: form.value.phone })
     }
     message.value = 'Đã cập nhật thông tin cá nhân.'
   } catch (err) {

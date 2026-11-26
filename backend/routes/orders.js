@@ -1,5 +1,5 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
+const { verifyAuthToken } = require('../utils/authTokens');
 const db = require('../config/db');
 
 // Tên file middleware của bạn có thể là authMiddleware.js hoặc auth.js
@@ -111,7 +111,7 @@ function readUser(req) {
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return null;
   try {
-    return jwt.verify(token, process.env.JWT_SECRET);
+    return verifyAuthToken(token);
   } catch (e) {
     return null;
   }
@@ -133,20 +133,27 @@ async function restock(items) {
 // ---------- Khách đặt hàng ----------
 // POST /api/orders  body: { id?, customer: {...}, items: [{ productId, size, color, qty }] }
 router.post('/orders', async (req, res) => {
-  const list = Array.isArray(req.body.items) ? req.body.items.slice(0, 50) : [];
+  const list = Array.isArray(req.body.items) ? req.body.items : [];
+  if (list.length > 50) return res.status(400).json({ success: false, message: 'Mỗi đơn hàng tối đa 50 dòng sản phẩm.' });
   if (!list.length) return res.status(400).json({ success: false, message: 'Giỏ hàng trống!' });
 
   const user = readUser(req);
+  if (!user) return res.status(401).json({ success: false, message: 'Bạn chưa đăng nhập!' });
   const customer = {};
   if (req.body.customer && typeof req.body.customer === 'object') {
-    for (const [k, v] of Object.entries(req.body.customer).slice(0, 20)) customer[str(k, 40)] = str(v, 300);
+    for (const [k, v] of Object.entries(req.body.customer).slice(0, 20)) {
+      const key = str(k, 40);
+      customer[key] = str(v, key === 'address' ? 500 : 300);
+    }
   }
   const rawId = String(req.body.id || '');
   const id = /^HQA-\d{6,20}$/.test(rawId) ? rawId : `HQA-${Date.now()}`;
 
-  const taken = []; // các dòng đã trừ kho (để hoàn lại nếu lỗi)
+  let client;
   try {
     await ensureTables();
+    client = await db.connect();
+    await client.query('BEGIN');
     const lines = [];
     for (const raw of list) {
       const qty = Math.floor(Number(raw.qty));
@@ -154,50 +161,63 @@ router.post('/orders', async (req, res) => {
       const size = str(raw.size, 40);
       const color = str(raw.color, 40);
       if (!productId || !Number.isFinite(qty) || qty < 1 || qty > 99) {
-        await restock(taken);
+        await client.query('ROLLBACK');
         return res.status(400).json({ success: false, message: 'Dữ liệu giỏ hàng không hợp lệ!' });
       }
-      const p = (await db.query('SELECT id, name, price, image FROM products WHERE id = $1', [productId])).rows[0];
+      const p = (await client.query('SELECT id, name, price, image FROM products WHERE id = $1', [productId])).rows[0];
       if (!p) {
-        await restock(taken);
+        await client.query('ROLLBACK');
         return res.status(400).json({ success: false, message: 'Có sản phẩm không còn bán!' });
       }
       // Trừ kho đúng 1 dòng biến thể (chỉ khi còn đủ hàng)
-      const upd = await db.query(
+      const upd = await client.query(
         `UPDATE product_variants SET stock = stock - $4
-         WHERE id = (SELECT id FROM product_variants WHERE product_id = $1 AND size = $2 AND color = $3 AND stock >= $4 ORDER BY id LIMIT 1)`,
+         WHERE id = (SELECT id FROM product_variants WHERE product_id = $1 AND size = $2 AND color = $3 AND stock >= $4 ORDER BY id LIMIT 1) AND stock >= $4`,
         [productId, size, color, qty]
       );
       if (!upd.rowCount) {
-        await restock(taken);
+        await client.query('ROLLBACK');
         return res.status(409).json({ success: false, message: `"${p.name}" (${size}, ${color}) không đủ số lượng trong kho!` });
       }
-      taken.push({ product_id: productId, size, color, qty });
       lines.push({ product: p, qty, size, color });
     }
 
     const subtotal = lines.reduce((sum, l) => sum + Number(l.product.price) * l.qty, 0);
     const shipping = subtotal >= 600000 ? 0 : 30000;
-    await db.query(
+    await client.query(
       'INSERT INTO hqa_orders (id, user_id, customer, subtotal, shipping, status) VALUES ($1,$2,$3::jsonb,$4,$5,$6)',
       [id, user?.id ?? null, JSON.stringify(customer), subtotal, shipping, 'pending']
     );
     for (const l of lines) {
-      await db.query(
+      await client.query(
         'INSERT INTO hqa_order_items (order_id, product_id, name, price, image, qty, size, color) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
         [id, l.product.id, l.product.name, l.product.price, l.product.image || '', l.qty, l.size, l.color]
       );
     }
+    // Trừ đúng số lượng đã mua trong giỏ của tài khoản hiện tại.
+    for (const l of lines) {
+      const params = [user.id, l.product.id, l.size, l.color, l.qty];
+      const changed = await client.query(
+        `UPDATE cart_items SET quantity = quantity - $5, updated_at = CURRENT_TIMESTAMP
+         WHERE user_id = $1 AND product_id = $2 AND size = $3 AND color = $4 AND quantity > $5`, params);
+      if (!changed.rowCount) {
+        await client.query(
+          `DELETE FROM cart_items WHERE user_id = $1 AND product_id = $2 AND size = $3 AND color = $4 AND quantity <= $5`, params);
+      }
+    }
+    await client.query('COMMIT');
     res.status(201).json({ success: true, id });
   } catch (error) {
     console.error('Lỗi đặt hàng:', error.message);
     try {
-      await restock(taken);
+      if (client) await client.query('ROLLBACK');
     } catch (e) {
-      console.error('Không hoàn được kho:', e.message);
+      console.error('Không rollback được đơn hàng:', e.message);
     }
     const dup = error.code === '23505';
     res.status(dup ? 409 : 500).json({ success: false, message: dup ? 'Mã đơn hàng bị trùng, vui lòng thử lại!' : 'Lỗi server' });
+  } finally {
+    if (client) client.release();
   }
 });
 

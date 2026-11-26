@@ -1,15 +1,4 @@
 'use strict';
-/**
- * Hiểu câu chat tiếng Việt cho trợ lý tư vấn size.
- * Chỉ gồm các hàm thuần (không truy cập DB, không gọi dịch vụ bên ngoài) nên dễ kiểm thử.
- *
- *  - normalize():            chữ thường, bỏ dấu, gọn khoảng trắng
- *  - extractMeasurements():  tách chiều cao, cân nặng, vòng ngực / eo / hông
- *  - detectIntent():         nhận diện ý định của khách
- *  - detectPreference():     thích mặc rộng hay ôm
- *  - detectAskedSize():      khách hỏi về một size cụ thể (vd "size M có vừa không")
- *  - resolveProduct():       nhận diện sản phẩm khách muốn mua trong danh mục cửa hàng
- */
 
 const FIELDS = {
   height: { label: 'Chiều cao', unit: 'cm', min: 100, max: 230 },
@@ -156,14 +145,6 @@ function detectIntent(raw, ctx = {}) {
   return 'unknown';
 }
 
-/** 'loose' = thích mặc rộng, 'tight' = thích mặc ôm, null = không nói. */
-function detectPreference(raw) {
-  const t = normalize(raw);
-  if (/(thich|muon|chuong|hay|mac|lay|form|dang)\s*(mac\s*)?(rong|thoai mai|oversize|xuong|loose)/.test(t) || /\b(rong rai|oversize|mac rong|form rong)\b/.test(t)) return 'loose';
-  if (/(thich|muon|chuong|hay|mac|lay|form|dang)\s*(mac\s*)?(om|om sat|body|fit)\b/.test(t) || /\b(om body|mac om|form om)\b/.test(t)) return 'tight';
-  return null;
-}
-
 /** Size khách nhắc tới, ví dụ "size M", "mặc XL". */
 function detectAskedSize(raw) {
   const t = normalize(raw);
@@ -295,7 +276,7 @@ function resolveProduct(raw, catalog, ctx = {}) {
   }
 
   // 3) "sản phẩm này / áo này / đầm này" -> sản phẩm đang xem
-  if (ctx.currentId && /\b(nay|do|kia|cai nay|mon nay|san pham nay)\b/.test(t)) {
+  if (ctx.currentId && /\b(san pham|cai|mon|mau|chiec|ao|dam|vay|quan|set|tui|khan|chan vay)\s+(nay|do|kia)\b/.test(t)) {
     const p = catalog.find((x) => x.id === ctx.currentId);
     if (p) return { ...none, product: p, viaContext: true };
   }
@@ -316,7 +297,6 @@ module.exports = {
   stripAccents,
   extractMeasurements,
   detectIntent,
-  detectPreference,
   detectAskedSize,
   detectColor,
   detectCategory,

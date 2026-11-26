@@ -55,7 +55,7 @@
 }
 
 .hqa-page-title {
-    font: 500 clamp(29px, 4vw, 46px)/1.18 "Playfair Display", serif;
+    font: 500 clamp(22px, 3vw, 36px)/1.18 "Playfair Display", serif;
     letter-spacing: -.6px;
     margin: 6px 0 12px
 }
@@ -1351,3 +1351,16 @@
         width: 64px
     }
 }
+
+/* Nút hiện/ẩn mật khẩu ở các màn hình đăng nhập và đăng ký. */
+.hqa-password-control { position: relative; width: 100%; display: flex; align-items: center; }
+.hqa-password-control input { width: 100%; min-width: 0; padding-right: 66px !important; }
+.hqa-password-control > button {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    display: inline-flex; justify-content: center; align-items: center;
+    min-width: 52px; min-height: 34px; border: 0; border-radius: 5px;
+    background: transparent; color: #9b566b; font-size: 13px; font-weight: 700;
+    cursor: pointer;
+}
+.hqa-password-control > button:hover,
+.hqa-password-control > button:focus-visible { background: #fbe9ee; outline: 2px solid #c88a9d; outline-offset: 1px; }

@@ -6,15 +6,17 @@ import {
   adminCreateCategory, adminDeleteCategory,
   getUserToken, getSizeCharts, adminUpdateSizeCharts,
   createOrder, getMyOrders, cancelMyOrder, adminGetOrders, adminSetOrderStatus,
+  getFavorites, addFavorite, removeFavorite,
+  getCart, apiAddToCart, apiUpdateCartItem, apiRemoveCartItem,
 } from '../services/api'
 import { useAdminAuthStore } from './adminAuth'
 
 const KEY = 'hqa_frontend_demo_v1'
 const clone = (value) => JSON.parse(JSON.stringify(value))
 function loadDemo() {
-  try { return JSON.parse(localStorage.getItem(KEY) || '{}') || {} } catch { return {} }
+  try { return JSON.parse(sessionStorage.getItem(KEY) || '{}') || {} } catch { return {} }
 }
-const cached = typeof localStorage === 'undefined' ? {} : loadDemo()
+const cached = typeof sessionStorage === 'undefined' ? {} : loadDemo()
 const asArray = (v, def) => Array.isArray(v) ? v : clone(def)
 
 // Khách có thể hủy đơn khi còn "Chờ xác nhận" hoặc "Đã duyệt" (chưa giao)
@@ -48,6 +50,12 @@ export function normalizeProduct(p) {
 
 // Tự làm mới dữ liệu (sản phẩm, đơn của khách) mỗi 20 giây để thấy thay đổi từ trang quản trị
 let pollTimer = null
+let cartRequestId = 0
+let cartInFlight = null
+let cartInFlightToken = ''
+let favoritesRequestId = 0
+let favoritesInFlight = null
+let favoritesInFlightToken = ''
 
 export const useHqaShopStore = defineStore('hqaShop', {
   state: () => ({
@@ -56,94 +64,252 @@ export const useHqaShopStore = defineStore('hqaShop', {
     catalogLoaded: false,
     adminOrders: [], // đơn hàng của toàn cửa hàng (chỉ trang quản trị dùng)
     sizeChart: asArray(cached.sizeChart, seedSizeChart),
-    cart: asArray(cached.cart, []),
-    favorites: asArray(cached.favorites, []),
+    cart: [],
+    cartLoading: false,
+    cartBusy: false,
+    cartError: '',
+    // Yêu thích là dữ liệu riêng của tài khoản; chỉ lấy từ backend, không dùng cache demo cũ.
+    favorites: [],
+    favoritesLoadedToken: '',
+    favoritesLoading: false,
+    favoritesError: '',
+    favoriteBusyIds: [],
     orders: asArray(cached.orders, []),
-    viewer: cached.viewer && typeof cached.viewer === 'object' ? cached.viewer : null,
+    viewer: getUserToken() && cached.viewer && typeof cached.viewer === 'object' ? cached.viewer : null,
   }),
   getters: {
     cartCount: (s) => s.cart.reduce((total, line) => total + line.qty, 0),
-    cartDetails: (s) => s.cart.map(line => ({ ...line, product: s.products.find(p => p.id === line.productId) })).filter(line => !!line.product),
+    cartDetails: (s) => s.cart,
     subtotal() { return this.cartDetails.reduce((total, line) => total + line.product.price * line.qty, 0) },
-    favoriteProducts: (s) => s.products.filter(p => s.favorites.includes(p.id)),
+    favoriteProducts: (s) => s.favorites.map(id => s.products.find(p => p.id === id)).filter(Boolean),
   },
   actions: {
     save() {
       try {
-        localStorage.setItem(KEY, JSON.stringify({ sizeChart: this.sizeChart, cart: this.cart, favorites: this.favorites, orders: this.orders, viewer: this.viewer }))
+        sessionStorage.setItem(KEY, JSON.stringify({ sizeChart: this.sizeChart, orders: this.orders, viewer: this.viewer }))
       } catch (error) { console.warn('Không thể lưu dữ liệu demo vào trình duyệt', error) }
     },
-    toggleFavorite(id) {
-      this.favorites = this.favorites.includes(id) ? this.favorites.filter(item => item !== id) : [...this.favorites, id]
-      this.save()
-    },
-    addToCart(productId, size, color, quantity = 1) {
-      const product = this.products.find(p => p.id === productId)
-      const qty = Math.max(1, Math.floor(Number(quantity) || 1))
-      if (!product || !product.sizes.includes(size) || !product.colors.includes(color)) return false
-      const key = `${productId}|${size}|${color}`
-      const existing = this.cart.find(line => line.key === key)
-      const alreadyInCart = this.cart.filter(line => line.productId === productId).reduce((n, line) => n + line.qty, 0)
-      if (qty + alreadyInCart > product.stock) return false
-      if (existing) existing.qty += qty
-      else this.cart.push({ key, productId, size, color, qty })
-      this.save()
-      return true
-    },
-    updateQuantity(key, quantity) {
-      const item = this.cart.find(line => line.key === key)
-      if (!item) return
-      const product = this.products.find(p => p.id === item.productId)
-      if (!product) return
-      const otherQty = this.cart.filter(line => line.productId === item.productId && line.key !== key).reduce((n, line) => n + line.qty, 0)
-      item.qty = Math.min(Math.max(1, Math.floor(Number(quantity) || 1)), Math.max(1, product.stock - otherQty))
-      this.save()
-    },
-    removeFromCart(key) { this.cart = this.cart.filter(line => line.key !== key); this.save() },
-    placeOrder(customer) {
-      if (!this.cartDetails.length) return null
-      const invalidStock = this.cartDetails.some(line => {
-        const totalQty = this.cartDetails.filter(x => x.productId === line.productId).reduce((n, x) => n + x.qty, 0)
-        return totalQty > line.product.stock
-      })
-      if (invalidStock) return null
-      const lines = this.cartDetails.map(({ product, qty, size, color }) => ({ productId: product.id, size, color, qty }))
-      const order = {
-        id: `HQA-${Date.now()}`, createdAt: new Date().toISOString(), status: 'Chờ xác nhận',
-        customer: clone(customer), items: this.cartDetails.map(({ product, qty, size, color }) => ({ productId: product.id, name: product.name, price: product.price, image: product.image, qty, size, color })),
-        subtotal: this.subtotal, shipping: this.subtotal >= 600000 ? 0 : 30000,
+    // Danh sách yêu thích được lưu trong PostgreSQL và chỉ tải cho JWT hiện hành.
+    async fetchFavorites(force = false) {
+      const token = getUserToken()
+      if (!token) {
+        this.favorites = []
+        this.favoritesLoadedToken = ''
+        return []
       }
-      this.orders.unshift(order)
-      for (const line of this.cartDetails) line.product.stock -= line.qty
-      this.cart = []
-      this.save()
-      this.syncOrder(order.id, customer, lines) // gửi đơn lên máy chủ (trừ kho thật, để admin duyệt)
-      return order.id
+      if (favoritesInFlight && favoritesInFlightToken === token) return favoritesInFlight
+      if (!force && this.favoritesLoadedToken === token) return this.favorites
+      const requestId = ++favoritesRequestId
+      this.favoritesLoading = true
+      this.favoritesError = ''
+      const load = (async () => {
+        try {
+          const res = await getFavorites()
+          if (getUserToken() !== token || requestId !== favoritesRequestId) return []
+          const ids = Array.isArray(res.data.data) ? res.data.data.map(String) : null
+          if (!ids) throw new Error('Dữ liệu yêu thích không hợp lệ.')
+          this.favorites = [...new Set(ids)]
+          this.favoritesLoadedToken = token
+          return this.favorites
+        } catch (error) {
+          if (getUserToken() === token && requestId === favoritesRequestId) {
+            this.favoritesError = error.response?.data?.message || 'Không tải được sản phẩm yêu thích.'
+          }
+          return []
+        } finally {
+          if (requestId === favoritesRequestId) this.favoritesLoading = false
+        }
+      })()
+      favoritesInFlight = load
+      favoritesInFlightToken = token
+      try {
+        return await load
+      } finally {
+        if (favoritesInFlight === load) {
+          favoritesInFlight = null
+          favoritesInFlightToken = ''
+        }
+      }
+    },
+    async toggleFavorite(rawId) {
+      const token = getUserToken()
+      if (!token) return { ok: false, reason: 'auth' }
+      const id = String(rawId ?? '')
+      if (!id) return { ok: false, message: 'Mã sản phẩm không hợp lệ.' }
+      if (this.favoriteBusyIds.includes(id)) return { ok: false, reason: 'busy' }
+      // Không cập nhật dựa vào danh sách chưa tải: có thể xóa nhầm yêu thích trên máy chủ.
+      if (this.favoritesLoadedToken !== token) {
+        await this.fetchFavorites()
+        if (getUserToken() !== token) return { ok: false, reason: 'auth' }
+        if (this.favoritesLoadedToken !== token) {
+          return { ok: false, message: this.favoritesError || 'Không tải được danh sách yêu thích.' }
+        }
+      }
+      if (this.favoriteBusyIds.includes(id)) return { ok: false, reason: 'busy' }
+      const wasFavorite = this.favorites.includes(id)
+      this.favoriteBusyIds.push(id)
+      this.favorites = wasFavorite ? this.favorites.filter(x => x !== id) : [id, ...this.favorites]
+      try {
+        if (wasFavorite) await removeFavorite(id)
+        else await addFavorite(id)
+        if (getUserToken() !== token) return { ok: false, reason: 'auth' }
+        return { ok: true, isFavorite: !wasFavorite }
+      } catch (error) {
+        if (getUserToken() === token) {
+          this.favorites = wasFavorite ? [id, ...this.favorites.filter(x => x !== id)] : this.favorites.filter(x => x !== id)
+          return { ok: false, message: error.response?.data?.message || 'Không lưu được sản phẩm yêu thích.' }
+        }
+        return { ok: false, reason: 'auth' }
+      } finally {
+        if (getUserToken() === token) this.favoriteBusyIds = this.favoriteBusyIds.filter(x => x !== id)
+      }
+    },
+    applyCart(data) {
+      if (!Array.isArray(data?.items)) throw new Error('Dữ liệu giỏ hàng không hợp lệ.')
+      this.cart = data.items.map(item => ({
+        key: String(item.cartItemId), cartItemId: item.cartItemId,
+        productId: String(item.productId), size: item.size, color: item.color,
+        qty: Number(item.quantity), stock: Number(item.stock),
+        isAiRecommended: item.isAiRecommended, aiFitNote: item.aiFitNote,
+        product: { id: String(item.productId), name: item.name, image: item.image,
+          price: Number(item.price), oldPrice: Number(item.oldPrice), stock: Number(item.stock) },
+      }))
+    },
+    async loadCart() {
+      const token = getUserToken()
+      if (!token) { this.cart = []; return [] }
+      if (this.cartBusy) return this.cart
+      if (cartInFlight && cartInFlightToken === token) return cartInFlight
+      const requestId = ++cartRequestId
+      this.cartLoading = true
+      this.cartError = ''
+      const load = (async () => {
+        try {
+          const res = await getCart()
+          if (getUserToken() === token && requestId === cartRequestId) this.applyCart(res.data.data)
+        } catch (error) {
+          if (getUserToken() === token && requestId === cartRequestId) {
+            this.cartError = error.response?.data?.message || error.message || 'Không tải được giỏ hàng.'
+          }
+        } finally {
+          if (requestId === cartRequestId) this.cartLoading = false
+        }
+        return this.cart
+      })()
+      cartInFlight = load
+      cartInFlightToken = token
+      try { return await load } finally {
+        if (cartInFlight === load) { cartInFlight = null; cartInFlightToken = '' }
+      }
+    },
+    async changeCart(request) {
+      const token = getUserToken()
+      if (!token || this.cartBusy) return false
+      // Kết quả GET cũ không được ghi đè kết quả POST/PUT/DELETE mới.
+      const requestId = ++cartRequestId
+      cartInFlight = null
+      cartInFlightToken = ''
+      this.cartLoading = false
+      this.cartBusy = true
+      this.cartError = ''
+      try {
+        const res = await request()
+        if (getUserToken() !== token || requestId !== cartRequestId) return false
+        this.applyCart(res.data.data)
+        return true
+      } catch (error) {
+        if (getUserToken() === token && requestId === cartRequestId) {
+          this.cartError = error.response?.data?.message || error.message || 'Không cập nhật được giỏ hàng.'
+        }
+        return false
+      } finally {
+        if (requestId === cartRequestId) this.cartBusy = false
+      }
+    },
+    async addToCart(productId, size, color, quantity = 1) {
+      const qty = Math.max(1, Math.floor(Number(quantity) || 1))
+      const ok = await this.changeCart(() => apiAddToCart({ productId, size, color, quantity: qty }))
+      if (ok && typeof window !== 'undefined') {
+        const product = this.products.find(p => p.id === String(productId))
+        window.dispatchEvent(new CustomEvent('hqa-cart-added', {
+          detail: { name: product?.name || 'Sản phẩm', quantity: qty },
+        }))
+      }
+      return ok
+    },
+    async updateQuantity(key, quantity) {
+      const item = this.cart.find(line => line.key === key)
+      if (!item) return false
+      return this.changeCart(() => apiUpdateCartItem(item.cartItemId, quantity))
+    },
+    async removeFromCart(key) {
+      const item = this.cart.find(line => line.key === key)
+      if (!item) return false
+      return this.changeCart(() => apiRemoveCartItem(item.cartItemId))
+    },
+    async placeOrder(customer) {
+      const token = getUserToken()
+      if (!token || this.cartBusy || this.cartLoading || !this.cart.length) return null
+      const lines = this.cart.map(({ productId, qty, size, color }) => ({ productId, size, color, qty }))
+      const id = `HQA-${Date.now()}`
+      const requestId = ++cartRequestId
+      cartInFlight = null
+      cartInFlightToken = ''
+      this.cartBusy = true
+      this.cartError = ''
+      try {
+        const res = await createOrder({ id, customer: clone(customer), items: lines })
+        if (getUserToken() !== token || requestId !== cartRequestId) return null
+        // Backend đã xóa các số lượng được mua trong cùng giao dịch tạo đơn.
+        this.cart = []
+        this.cartBusy = false
+        await Promise.all([this.loadCart(), this.fetchCatalog(), this.fetchMyOrders()])
+        if (getUserToken() !== token) return null
+        return res.data.id || id
+      } catch (error) {
+        if (getUserToken() === token && requestId === cartRequestId) {
+          this.cartError = error.response?.data?.message || error.message || 'Không đặt được đơn hàng.'
+        }
+        return null
+      } finally {
+        if (requestId === cartRequestId) this.cartBusy = false
+      }
     },
     setViewer(person) {
       this.viewer = { name: String(person.name || '').trim(), email: String(person.email || '').trim(), phone: String(person.phone || '').trim() }
       this.save()
     },
-    logout() { this.viewer = null; this.save() },
-    // ===== Đơn hàng: lưu trong PostgreSQL =====
-    async syncOrder(id, customer, items) {
-      try {
-        await createOrder({ id, customer: clone(customer), items })
-        await this.fetchCatalog() // tồn kho mới sau khi trừ hàng
-        await this.fetchMyOrders()
-      } catch (error) {
-        console.error(error)
-        alert(error?.response?.data?.message || 'Không gửi được đơn hàng lên máy chủ. Vui lòng thử lại.')
-        this.orders = this.orders.filter(o => o.id !== id)
-        this.save()
-        await this.fetchCatalog()
-      }
+    clearSession() {
+      ++cartRequestId
+      cartInFlight = null
+      cartInFlightToken = ''
+      this.cartLoading = false
+      this.cartBusy = false
+      this.cartError = ''
+      ++favoritesRequestId // hủy hiệu lực các yêu cầu đang chạy từ phiên cũ
+      favoritesInFlight = null
+      favoritesInFlightToken = ''
+      this.viewer = null
+      this.cart = []
+      this.favorites = []
+      this.favoritesLoadedToken = ''
+      this.favoritesLoading = false
+      this.favoritesError = ''
+      this.favoriteBusyIds = []
+      this.orders = []
+      this.adminOrders = []
+      try { sessionStorage.removeItem(KEY) } catch { /* không thể lưu */ }
     },
+    logout() { this.clearSession() },
+    // ===== Đơn hàng: lưu trong PostgreSQL =====
     // Đơn của khách đang đăng nhập (kèm trạng thái mới nhất do admin duyệt)
     async fetchMyOrders() {
-      if (!hasUserToken()) return
+      const token = getUserToken()
+      if (!token) return
       try {
         const res = await getMyOrders()
+        // Một yêu cầu đang chạy không được ghi dữ liệu của tài khoản cũ vào phiên mới.
+        if (getUserToken() !== token) return
         const server = Array.isArray(res.data.data) ? res.data.data : []
         const ids = new Set(server.map(o => o.id))
         this.orders = [...server, ...this.orders.filter(o => !ids.has(o.id))]
@@ -221,11 +387,11 @@ export const useHqaShopStore = defineStore('hqaShop', {
         console.error('Không thể tải sản phẩm từ máy chủ:', error)
       }
     },
-    // ShopLayout gọi hàm này khi mở trang. Giỏ hàng hiện lưu trong trình duyệt nên không cần tải gì thêm.
+    // Giỏ hàng và yêu thích được tải theo tài khoản từ PostgreSQL.
     // Đồng thời tải sản phẩm/danh mục từ database (nếu chưa tải) để các trang quản trị và cửa hàng luôn có dữ liệu.
     async fetchCart() {
       if (!this.catalogLoaded) await this.fetchCatalog()
-      await this.fetchMyOrders()
+      await Promise.all([this.loadCart(), this.fetchMyOrders(), this.fetchFavorites()])
       this.startPolling()
       return this.cart
     },

@@ -12,6 +12,7 @@ const email = ref('')
 const password = ref('')
 const error = ref('')
 const loading = ref(false)
+const showPassword = ref(false)
 
 async function submit() {
   error.value = ''
@@ -60,7 +61,10 @@ async function submit() {
 
       <div class="hqa-form-field">
         <label for="admin-password">Mật khẩu</label>
-        <input id="admin-password" v-model="password" type="password" autocomplete="current-password" required />
+        <div class="hqa-password-control">
+          <input id="admin-password" v-model="password" :type="showPassword ? 'text' : 'password'" autocomplete="current-password" required />
+          <button type="button" :aria-label="showPassword ? 'Ẩn mật khẩu' : 'Xem mật khẩu'" :aria-pressed="showPassword" @click="showPassword = !showPassword">{{ showPassword ? 'Ẩn' : 'Hiện' }}</button>
+        </div>
       </div>
 
       <div v-if="error" class="hqa-alert" role="alert">{{ error }}</div>

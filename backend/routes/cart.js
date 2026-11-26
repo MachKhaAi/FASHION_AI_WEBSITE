@@ -1,9 +1,9 @@
 const express = require('express');
 const db = require('../config/db');
-const { requireAuth } = require('../middleware/authMiddleware');
+const { requireAuth, requireRole } = require('../middleware/authMiddleware');
 
 const router = express.Router();
-router.use(requireAuth);
+router.use(requireAuth, requireRole('customer'));
 
 // Ảnh hiển thị trong giỏ: ảnh đúng màu khách đã chọn (bảng product_images), nếu không có thì dùng ảnh chính
 const IMAGE_BY_COLOR = `COALESCE(
@@ -75,6 +75,9 @@ router.post('/items', async (req, res) => {
     const { productId, size, color, quantity = 1, isAiRecommended = false, aiFitNote = null } = req.body;
     const addQty = Number(quantity);
 
+    if (!Number.isSafeInteger(addQty) || addQty < 1) {
+      return res.status(400).json({ success: false, message: 'Số lượng không hợp lệ!' });
+    }
     if (!productId || !size || !color) {
       return res.status(400).json({ success: false, message: 'Vui lòng chọn đầy đủ sản phẩm, size và màu!' });
     }
@@ -89,25 +92,19 @@ router.post('/items', async (req, res) => {
     const stock = Number(variantRes.rows[0].stock) || 0;
     if (stock <= 0) return res.status(400).json({ success: false, message: 'Sản phẩm này đã hết hàng!' });
 
-    const existingRes = await db.query(
-      `SELECT id, quantity FROM cart_items WHERE user_id = $1 AND product_id = $2 AND size = $3 AND color = $4`,
-      [userId, productId, size, color]
+    if (addQty > stock) return res.status(400).json({ success: false, message: `Vượt quá tồn kho (còn ${stock})!` });
+    const saved = await db.query(
+      `INSERT INTO cart_items (user_id, product_id, size, color, quantity, is_ai_recommended, ai_fit_note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (user_id, product_id, size, color) DO UPDATE SET
+         quantity = cart_items.quantity + EXCLUDED.quantity,
+         is_ai_recommended = COALESCE(EXCLUDED.is_ai_recommended, cart_items.is_ai_recommended),
+         ai_fit_note = COALESCE(EXCLUDED.ai_fit_note, cart_items.ai_fit_note),
+         updated_at = CURRENT_TIMESTAMP
+       WHERE cart_items.quantity + EXCLUDED.quantity <= $8 RETURNING id`,
+      [userId, productId, size, color, addQty, isAiRecommended, aiFitNote, stock]
     );
-
-    if (existingRes.rows.length > 0) {
-      const newQty = Number(existingRes.rows[0].quantity) + addQty;
-      if (newQty > stock) return res.status(400).json({ success: false, message: `Kho chỉ còn ${stock} sản phẩm!` });
-      await db.query(
-        `UPDATE cart_items SET quantity = $1, is_ai_recommended = COALESCE($2, is_ai_recommended), ai_fit_note = COALESCE($3, ai_fit_note), updated_at = CURRENT_TIMESTAMP WHERE id = $4`,
-        [newQty, isAiRecommended, aiFitNote, existingRes.rows[0].id]
-      );
-    } else {
-      if (addQty > stock) return res.status(400).json({ success: false, message: `Vượt quá tồn kho (còn ${stock})!` });
-      await db.query(
-        `INSERT INTO cart_items (user_id, product_id, size, color, quantity, is_ai_recommended, ai_fit_note) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [userId, productId, size, color, addQty, isAiRecommended, aiFitNote]
-      );
-    }
+    if (!saved.rowCount) return res.status(400).json({ success: false, message: `Kho chỉ còn ${stock} sản phẩm!` });
     const cart = await getCartData(userId);
     res.json({ success: true, message: 'Đã thêm vào giỏ hàng!', data: cart });
   } catch (error) {
@@ -121,7 +118,10 @@ router.put('/items/:cartItemId', async (req, res) => {
     const cartItemId = Number(req.params.cartItemId);
     const newQty = Number(req.body.quantity);
 
-    if (newQty <= 0) {
+    if (!Number.isSafeInteger(cartItemId) || cartItemId < 1 || !Number.isSafeInteger(newQty) || newQty < 0) {
+      return res.status(400).json({ success: false, message: 'Số lượng hoặc mã giỏ hàng không hợp lệ!' });
+    }
+    if (newQty === 0) {
       await db.query('DELETE FROM cart_items WHERE id = $1 AND user_id = $2', [cartItemId, userId]);
       return res.json({ success: true, data: await getCartData(userId) });
     }

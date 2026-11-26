@@ -30,7 +30,7 @@ const visibleProducts = computed(() => {
     <section class="hero">
       <div class="hero-copy">
         <span class="eyebrow">Bộ sưu tập thu 2026</span>
-        <h1>Dịu dàng, theo cách của bạn</h1>
+        <h1>Dịu dàng theo cách của bạn</h1>
         <p>
           Những thiết kế nữ tính lấy cảm hứng từ phong cách Hàn Quốc, dành cho
           mỗi ngày của bạn.
@@ -119,9 +119,6 @@ const visibleProducts = computed(() => {
             <div><b>18</b><small>Giây</small></div>
           </div>
           <a class="btn dark" data-sale="1" href="#products">Mua ngay</a>
-          <p style="margin: 16px 0 0; font-size: 11px">
-            Ưu đãi và thời gian minh họa
-          </p>
         </div>
         <div class="ph tone1"><img class="ph-img" src="/images/home/promo.jpg" alt="Phụ kiện Mid-season Sale" loading="lazy" /></div>
       </section>
@@ -153,7 +150,7 @@ const visibleProducts = computed(() => {
             <path d="M2 5h12v12H2zM14 9h4l4 4v4h-8"></path>
             <circle cx="6" cy="18" r="2"></circle>
             <circle cx="18" cy="18" r="2"></circle></svg
-          >Freeship từ 500K
+          >Freeship từ 600K
         </div>
         <div>
           <svg aria-hidden="true" class="icon" viewbox="0 0 24 24">

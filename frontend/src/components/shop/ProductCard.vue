@@ -4,17 +4,27 @@ import { computed } from "vue";
 import { useRouter } from "vue-router";
 import HqaIcon from "../common/HqaIcon.vue";
 import { money } from "../../mocks/products";
-import { useHqaShopStore } from "../../stores/hqaShop";
+import { useFavoriteActions } from "../../composables/useFavoriteActions";
 import { demo } from "../../stores/hqaDemo"; // Tạm dùng biến dialog của demo để trigger mở popup
 
 const props = defineProps({ product: { type: Object, required: true } });
 const router = useRouter();
-const shop = useHqaShopStore();
+const { shop, toggleFavorite } = useFavoriteActions();
 
 // Sản phẩm thật (trong database) tương ứng với thẻ này
 const realProduct = computed(() => shop.products.find((p) => p.name === props.product.name));
 // Hết hàng khi sản phẩm có trong database và tồn kho <= 0
 const soldOut = computed(() => !!realProduct.value && Number(realProduct.value.stock) <= 0);
+
+async function toggleRealFavorite() {
+  // Mock trên trang chủ có id 0..7, không trùng với id thật sp4..sp11.
+  if (!realProduct.value) await shop.fetchCatalog();
+  if (!realProduct.value) {
+    window.alert('Không tìm thấy sản phẩm này trong hệ thống. Vui lòng thử lại.');
+    return;
+  }
+  await toggleFavorite(realProduct.value.id);
+}
 
 // Chuyển hướng đến trang chi tiết sản phẩm thực tế khi bấm vào hình hoặc tên
 function goToRealProduct() {
@@ -81,11 +91,12 @@ function openRealProductDialog(event) {
       </div>
       <button
         class="ib heart"
-        :aria-label="`Yêu thích ${product.name}`"
-        :aria-pressed="shop.favorites.includes(product.id)"
-        @click.stop="shop.toggleFavorite(product.id)"
+        :aria-label="realProduct && shop.favorites.includes(realProduct.id) ? `Bỏ yêu thích ${product.name}` : `Yêu thích ${product.name}`"
+        :aria-pressed="!!realProduct && shop.favorites.includes(realProduct.id)"
+        :disabled="!!realProduct && shop.favoriteBusyIds.includes(realProduct.id)"
+        @click.stop="toggleRealFavorite"
       >
-        <span v-if="shop.favorites.includes(product.id)">♥</span
+        <span v-if="realProduct && shop.favorites.includes(realProduct.id)">♥</span
         ><HqaIcon v-else name="heart" />
       </button>
       <div class="quick">

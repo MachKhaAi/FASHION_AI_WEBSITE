@@ -25,6 +25,7 @@ const CONFIDENCE_TEXT = {
   high: 'Khớp hoàn toàn',
   medium: 'Khá phù hợp',
   low: 'Chỉ mang tính tham khảo',
+  partial: 'Chỉ khớp các số đo đã cung cấp',
 }
 
 // Đã đăng nhập thì tự điền số đo đã lưu để khách không phải nhập lại.
@@ -81,7 +82,7 @@ async function suggest() {
       throw new Error(data.message || 'Không thể tư vấn size.')
     }
     if (!data.recommended_size) {
-      error.value = data.message || 'Hiện chưa có bảng size để tư vấn.'
+      error.value = data.message || 'Chưa thể xác định size từ bảng size của shop.'
       return
     }
 
@@ -165,7 +166,7 @@ async function suggest() {
         </table>
 
         <div v-if="result.alternatives.length" class="hqa-dim" style="margin-top: 10px; font-size: 13px">
-          Các size gần nhất khác: {{ result.alternatives.map((a) => a.size).join(', ') }}.
+          Các size khác trong bảng: {{ result.alternatives.map((a) => a.size).join(', ') }}.
         </div>
 
         <button

@@ -12,7 +12,7 @@ import HqaIcon from "../components/common/HqaIcon.vue";
 import HqaSizeChat from "../components/chatbot/HqaSizeChat.vue";
 import { useHqaChatStore } from "../stores/hqaChat";
 import { useAdminAuthStore } from "../stores/adminAuth";
-import { demo, message, showFavorites } from "../stores/hqaDemo";
+import { demo, message } from "../stores/hqaDemo";
 import { useHqaShopStore, hasUserToken } from "../stores/hqaShop";
 
 const router = useRouter();
@@ -39,7 +39,7 @@ const newsletterStatus = ref(
 );
 
 // Trạng thái đăng nhập dạng reactive.
-// hasUserToken() đọc localStorage nên Vue không tự biết khi token thay đổi
+// hasUserToken() đọc sessionStorage nên Vue không tự biết khi token thay đổi
 const loggedIn = ref(hasUserToken());
 function syncAuth() {
   const now = hasUserToken();
@@ -51,19 +51,13 @@ function syncAuth() {
 // Số lượng sản phẩm trong giỏ: chưa đăng nhập / đã đăng xuất thì hiện 0
 const cartCount = computed(() => (loggedIn.value ? shop.cartCount : 0));
 
-// Hiệu ứng + thông báo khi thêm vào giỏ
-const toast = ref({ show: false, text: "" });
-const badgeBump = ref(0); // đổi giá trị để chạy lại hiệu ứng nảy của biểu tượng giỏ
-let toastTimer = null;
-function showToast(text) {
-  toast.value = { show: true, text };
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast.value.show = false;
-  }, 2200);
+// Chỉ giữ hiệu ứng cập nhật giỏ; không hiện toast thành công.
+const badgeBump = ref(0);
+function handleCartAdded() {
+  badgeBump.value++;
 }
 
-// Cập nhật khi đổi trang, khi store thay đổi người dùng, hoặc token đổi ở tab khác
+// Cập nhật khi đổi trang hay khi dữ liệu người dùng của chính tab này thay đổi
 watch(() => route.fullPath, syncAuth);
 watch(() => shop.viewer, syncAuth);
 
@@ -121,12 +115,6 @@ function handleClick(event) {
   // Menu điện thoại
   if (action === "menu") {
     menuOpen.value = !menuOpen.value;
-    return;
-  }
-
-  // Sản phẩm yêu thích
-  if (action === "favorites") {
-    showFavorites();
     return;
   }
 
@@ -242,12 +230,13 @@ function escape(event) {
 }
 
 // Hàm xử lý thêm vào giỏ hàng từ popup trên trang chủ
-// Lưu ý: shop.addToCart (hqaShop.js) là hàm đồng bộ, trả về true/false
-function handleRealAddToCart() {
+// Chờ API xác nhận lưu vào PostgreSQL.
+async function handleRealAddToCart() {
+  if (isAddingToCart.value || shop.cartBusy) return;
   if (!hasUserToken()) {
     alert("Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng!");
     demo.dialog = null;
-    router.push({ path: "/dang-nhap", query: { redirect: "/" } });
+    router.push({ path: "/dang-nhap", query: { redirect: route.fullPath } });
     return;
   }
 
@@ -268,7 +257,7 @@ function handleRealAddToCart() {
       return;
     }
 
-    const added = shop.addToCart(
+    const added = await shop.addToCart(
       payload.product.id,
       payload.size,
       payload.color, // Màu người dùng chọn ở popup
@@ -277,11 +266,10 @@ function handleRealAddToCart() {
 
     if (added) {
       demo.dialog = null; // Đóng form khi thành công
-      badgeBump.value++; // chạy hiệu ứng nảy ở biểu tượng giỏ
-      showToast("Đã thêm sản phẩm vào giỏ hàng");
+      // Store tự cập nhật giỏ hàng; không hiện thông báo thành công.
     } else {
       alert(
-        "Không thể thêm vào giỏ hàng: sản phẩm không đủ hàng hoặc lựa chọn không hợp lệ."
+        shop.cartError || "Không thể thêm vào giỏ hàng. Vui lòng thử lại."
       );
     }
   } catch (error) {
@@ -300,18 +288,19 @@ onMounted(() => {
   // Tải giỏ hàng từ backend nếu khách hàng đã đăng nhập
   if (hasUserToken()) {
     shop.fetchCart();
+  } else if (!shop.catalogLoaded) {
+    shop.fetchCatalog(); // Trang chủ mock cần đối chiếu ID sản phẩm thật cho nút trái tim.
   }
 
   window.addEventListener("keydown", escape);
-  window.addEventListener("storage", syncAuth);
   window.addEventListener("focus", syncAuth);
+  window.addEventListener("hqa-cart-added", handleCartAdded);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", escape);
-  window.removeEventListener("storage", syncAuth);
   window.removeEventListener("focus", syncAuth);
-  clearTimeout(toastTimer);
+  window.removeEventListener("hqa-cart-added", handleCartAdded);
 });
 </script>
 
@@ -391,17 +380,17 @@ onBeforeUnmount(() => {
           </svg>
         </a>
 
-        <button
-          aria-label="Yêu thích"
+        <RouterLink
+          aria-label="Xem sản phẩm yêu thích"
           class="ib desktop-only"
-          data-action="favorites"
+          to="/yeu-thich"
         >
           <svg aria-hidden="true" class="icon" viewBox="0 0 24 24">
             <path
               d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"
             ></path>
           </svg>
-        </button>
+        </RouterLink>
 
         <a aria-label="Giỏ hàng" class="ib" href="#cart">
           <svg aria-hidden="true" class="icon" viewBox="0 0 24 24">
@@ -623,52 +612,9 @@ onBeforeUnmount(() => {
     </template>
   </dialog>
 
-  <!-- Thông báo thêm vào giỏ hàng -->
-  <Transition name="cart-toast">
-    <div v-if="toast.show" class="cart-toast" role="status" aria-live="polite">
-      <svg aria-hidden="true" class="cart-toast-icon" viewBox="0 0 24 24">
-        <path d="M5 12.5l4.5 4.5L19 7.5"></path>
-      </svg>
-      <span>{{ toast.text }}</span>
-    </div>
-  </Transition>
 </template>
 
 <style scoped>
-.cart-toast {
-  position: fixed;
-  top: 84px;
-  right: 24px;
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 18px;
-  border-radius: 999px;
-  background: #5c4a42;
-  color: #fff;
-  font-size: 14px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
-}
-.cart-toast-icon {
-  width: 20px;
-  height: 20px;
-  flex: none;
-  fill: none;
-  stroke: #9be3b0;
-  stroke-width: 2.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.cart-toast-enter-active,
-.cart-toast-leave-active {
-  transition: opacity 0.25s ease, transform 0.25s ease;
-}
-.cart-toast-enter-from,
-.cart-toast-leave-to {
-  opacity: 0;
-  transform: translateY(-10px);
-}
 .badge.bump {
   animation: badge-bump 0.45s ease;
 }
@@ -676,14 +622,5 @@ onBeforeUnmount(() => {
   0% { scale: 1; }
   40% { scale: 1.6; }
   100% { scale: 1; }
-}
-@media (max-width: 600px) {
-  .cart-toast {
-    top: auto;
-    bottom: 90px;
-    left: 16px;
-    right: 16px;
-    justify-content: center;
-  }
 }
 </style>

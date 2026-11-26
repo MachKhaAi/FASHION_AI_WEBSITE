@@ -1,6 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const { signAuthToken } = require('../utils/authTokens');
 const db = require('../config/db');
 const { requireAdmin } = require('../middleware/authMiddleware');
 
@@ -67,11 +67,7 @@ router.post('/login', async (req, res) => {
 
     fails.delete(key);
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.ADMIN_JWT_EXPIRES_IN || '8h' }
-    );
+    const token = signAuthToken(user, process.env.ADMIN_JWT_EXPIRES_IN || '8h');
 
     res.json({
       success: true,

@@ -5,10 +5,12 @@ import { useHqaShopStore, normalizeProduct, hasUserToken } from '../../stores/hq
 import { getProductById, getProducts, getProductSizeChart } from '../../services/api'
 import { money } from '../../data/hqaCatalog'
 import { useHqaChatStore } from '../../stores/hqaChat'
+import { useFavoriteActions } from '../../composables/useFavoriteActions'
 import HqaProductCard from '../../components/shop/HqaProductCard.vue'
 import '../../assets/hqa-pages.css'
 
 const shop = useHqaShopStore(), route = useRoute(), router = useRouter()
+const { toggleFavorite } = useFavoriteActions()
 
 const product = ref(null)
 const loading = ref(false)
@@ -171,24 +173,13 @@ async function add() {
     return
   }
 
-  const result = await shop.addToCart(
-    product.value.id,
-    size.value,
-    color.value,
-    qty.value,
-    {
-      isAiRecommended: isAiRecommended.value,
-      aiFitNote: isAiRecommended.value ? `Size ${size.value} được gợi ý bởi AI` : null,
-    }
-  )
-
-  if (result.requireLogin) {
-    alert(result.message)
-    router.push({ path: '/dang-nhap', query: { redirect: route.fullPath } })
+  const result = await shop.addToCart(product.value.id, size.value, color.value, qty.value)
+  if (!result) {
+    notice.value = shop.cartError || 'Không thể thêm vào giỏ hàng. Vui lòng thử lại.'
     return
   }
-
-  notice.value = result.message
+  // Thêm thành công: chỉ cập nhật biểu tượng / số lượng giỏ hàng, không hiện thông báo.
+  notice.value = ''
 }
 </script>
 
@@ -215,9 +206,9 @@ async function add() {
           <div class="hqa-detail-option"><strong>Màu sắc: {{ color }}</strong><div class="hqa-swatch-row"><button v-for="item in product.colors" :key="item" type="button" class="hqa-swatch" :class="{selected:color===item, 'is-out':!colorInStock(item), 'has-thumb':!!colorThumb(item)}" :aria-pressed="color===item" @click="pickColor(item)"><img v-if="colorThumb(item)" class="hqa-swatch-thumb" :src="colorThumb(item)" alt="" loading="lazy" />{{ item }}</button></div></div>
           <div class="hqa-detail-option"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><strong style="margin:0">Kích thước: {{ size }}</strong><button type="button" class="hqa-link-button" @click="openChart">Xem bảng size</button></div><div class="hqa-swatch-row" style="margin-top:11px"><button v-for="item in product.sizes" :key="item" type="button" class="hqa-swatch" :class="{selected:size===item, 'is-out':!sizeInStock(item)}" :aria-pressed="size===item" @click="pickSize(item)">{{ item }}</button></div></div>
           <button type="button" class="hqa-secondary" style="margin-top:16px" @click="chat.openChat({ product })">✧ Chat với trợ lý tư vấn size</button>
-          <div class="hqa-buy-actions"><div class="hqa-qty" aria-label="Số lượng"><button type="button" aria-label="Giảm số lượng" :disabled="qty<=1" @click="qty--">−</button><span>{{ qty }}</span><button type="button" aria-label="Tăng số lượng" :disabled="qty>=currentStock" @click="qty++">+</button></div><button class="hqa-primary" type="button" :disabled="currentStock<=0" @click="add">Thêm vào giỏ hàng →</button></div>
-          <div v-if="notice" :class="['hqa-alert', notice.startsWith('Đã') ? 'hqa-success' : '']" role="status">{{ notice }} <router-link v-if="notice.startsWith('Đã')" to="/gio-hang" style="text-decoration:underline">Xem giỏ hàng</router-link></div>
-          <button type="button" class="hqa-link-button" @click="shop.toggleFavorite(product.id)">{{ shop.favorites.includes(product.id) ? '♥ Đã lưu yêu thích' : '♡ Thêm vào yêu thích' }}</button>
+          <div class="hqa-buy-actions"><div class="hqa-qty" aria-label="Số lượng"><button type="button" aria-label="Giảm số lượng" :disabled="qty<=1" @click="qty--">−</button><span>{{ qty }}</span><button type="button" aria-label="Tăng số lượng" :disabled="qty>=currentStock" @click="qty++">+</button></div><button class="hqa-primary" type="button" :disabled="currentStock<=0 || shop.cartBusy" @click="add">Thêm vào giỏ hàng →</button></div>
+          <div v-if="notice" :class="['hqa-alert', notice.startsWith('Đã chọn') ? 'hqa-success' : '']" role="status">{{ notice }}</div>
+          <button type="button" class="hqa-link-button" :aria-pressed="shop.favorites.includes(product.id)" :disabled="shop.favoriteBusyIds.includes(product.id)" @click="toggleFavorite(product.id)">{{ shop.favorites.includes(product.id) ? '♥ Đã lưu yêu thích' : '♡ Thêm vào yêu thích' }}</button>
           <div class="hqa-line"></div><p class="hqa-dim">✧ Miễn phí vận chuyển đơn từ 600.000đ</p><p class="hqa-dim">✧ Vui lòng kiểm tra bảng size trước khi đặt hàng</p>
         </div>
       </div>

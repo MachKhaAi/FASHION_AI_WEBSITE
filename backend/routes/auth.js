@@ -1,6 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const { signAuthToken } = require('../utils/authTokens');
 const db = require('../config/db');
 const { requireAuth } = require('../middleware/authMiddleware');
 
@@ -10,11 +10,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SALT_ROUNDS = 10;
 
 function signToken(user) {
-  return jwt.sign(
-    { id: user.id, email: user.email, role: user.role },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-  );
+  return signAuthToken(user, process.env.JWT_EXPIRES_IN || '7d');
 }
 
 // ---------------------------------------------------------------------------

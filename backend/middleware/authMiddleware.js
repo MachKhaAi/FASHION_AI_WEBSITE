@@ -1,4 +1,4 @@
-const jwt = require('jsonwebtoken');
+const { verifyAuthToken } = require('../utils/authTokens');
 const db = require('../config/db');
 
 // Bắt buộc đăng nhập: đọc token từ header "Authorization: Bearer <token>"
@@ -11,7 +11,7 @@ function requireAuth(req, res, next) {
   }
 
   try {
-    req.user = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = verifyAuthToken(token);
     next();
   } catch (error) {
     return res.status(401).json({ success: false, message: 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn!' });

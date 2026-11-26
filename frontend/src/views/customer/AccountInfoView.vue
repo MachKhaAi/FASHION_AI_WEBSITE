@@ -14,9 +14,6 @@ import '../../assets/hqa-pages.css'
 const router = useRouter()
 const shop = useHqaShopStore()
 
-// Danh sách số đo: dùng chung cho phần hiển thị, form và kiểm tra dữ liệu.
-// min/max PHẢI khớp với MEASURE_RANGES trong routes/auth.js (backend).
-// height/chest/waist/hip là cột integer nên step = 1; weight là numeric nên step = 0.1.
 const MEASURES = [
   { key: 'height', label: 'Chiều cao', unit: 'cm', min: 100, max: 230, step: 1, placeholder: 'VD: 160' },
   { key: 'weight', label: 'Cân nặng', unit: 'kg', min: 20, max: 250, step: 0.1, placeholder: 'VD: 48.5' },
@@ -62,9 +59,11 @@ function showMeasure(m) {
 }
 
 async function load() {
-  if (!getUserToken()) return goLogin()
+  const token = getUserToken()
+  if (!token) return goLogin()
   try {
     const { data } = await getMyProfile()
+    if (getUserToken() !== token) return
     profile.value = data.user
   } catch (err) {
     if (err.response?.status === 401 || err.response?.status === 404) return goLogin()
@@ -78,7 +77,6 @@ function startEdit() {
   message.value = ''
   error.value = ''
   const p = profile.value
-  // Dùng ?? để giữ nguyên giá trị hợp lệ, chỉ đổi null/undefined thành chuỗi rỗng
   form.value = {
     full_name: p.full_name,
     phone: p.phone || '',
@@ -134,8 +132,10 @@ async function save() {
   }
 
   saving.value = true
+  const token = getUserToken()
   try {
     const { data } = await updateMyProfile(payload)
+    if (getUserToken() !== token) return
 
     // Backend trả về user đầy đủ (kèm địa chỉ và số đo đã đọc lại từ DB)
     profile.value = data.user

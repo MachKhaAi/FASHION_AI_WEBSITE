@@ -1,10 +1,10 @@
 <script setup>
 import { computed } from 'vue'
-import { useHqaShopStore } from '../../stores/hqaShop'
+import { useFavoriteActions } from '../../composables/useFavoriteActions'
 import { money } from '../../data/hqaCatalog'
 import '../../assets/hqa-pages.css'
 const props = defineProps({ product: { type: Object, required: true } })
-const shop = useHqaShopStore()
+const { shop, toggleFavorite } = useFavoriteActions()
 const categoryName = computed(() => props.product.categoryName || shop.categories.find(x => x.id === props.product.categoryId)?.name || 'Thời trang')
 const discount = computed(() => props.product.oldPrice > props.product.price ? Math.round((props.product.oldPrice - props.product.price) / props.product.oldPrice * 100) : 0)
 const soldOut = computed(() => Number(props.product.stock) <= 0)
@@ -21,7 +21,9 @@ const soldOut = computed(() => Number(props.product.stock) <= 0)
       <button class="hqa-heart" :class="{ 'is-favorite': shop.favorites.includes(product.id) }" type="button"
         :aria-label="shop.favorites.includes(product.id) ? 'Bỏ khỏi yêu thích' : 'Thêm vào yêu thích'"
         :title="shop.favorites.includes(product.id) ? 'Bỏ yêu thích' : 'Yêu thích'"
-        @click="shop.toggleFavorite(product.id)">{{ shop.favorites.includes(product.id) ? '♥' : '♡' }}</button>
+        :aria-pressed="shop.favorites.includes(product.id)"
+        :disabled="shop.favoriteBusyIds.includes(product.id)"
+        @click="toggleFavorite(product.id)">{{ shop.favorites.includes(product.id) ? '♥' : '♡' }}</button>
     </div>
     <p class="hqa-product-category">{{ categoryName }}</p>
     <router-link :to="`/san-pham/${product.id}`"><h3 class="hqa-product-title">{{ product.name }}</h3></router-link>

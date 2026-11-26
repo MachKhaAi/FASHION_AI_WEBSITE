@@ -28,7 +28,7 @@ function logout() {
           <span>{{ item.icon }}</span>{{ item.text }}
         </router-link>
       </nav>
-      <a href="/" target="hqa-shop" class="hqa-admin-back">← Trở về cửa hàng</a>
+      <a href="/" target="_blank" rel="noopener noreferrer" class="hqa-admin-back">← Trở về cửa hàng</a>
     </aside>
     <div class="hqa-admin-main">
       <header class="hqa-admin-topbar">

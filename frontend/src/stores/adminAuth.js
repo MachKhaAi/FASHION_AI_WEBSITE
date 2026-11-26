@@ -1,23 +1,11 @@
 import { defineStore } from 'pinia'
-import { adminLogin, adminMe, ADMIN_TOKEN_KEY } from '../services/api'
-
-function readToken() {
-  try { return localStorage.getItem(ADMIN_TOKEN_KEY) || '' } catch { return '' }
-}
-function writeToken(value) {
-  try {
-    if (value) localStorage.setItem(ADMIN_TOKEN_KEY, value)
-    else localStorage.removeItem(ADMIN_TOKEN_KEY)
-  } catch {
-    // bỏ qua nếu trình duyệt chặn localStorage
-  }
-}
+import { adminLogin, adminMe, getAdminToken, setAdminToken, clearUserToken } from '../services/api'
 
 export const useAdminAuthStore = defineStore('adminAuth', {
   state: () => ({
-    token: readToken(),
+    token: getAdminToken(),
     admin: null,
-    checked: false, // đã hỏi server xác nhận token trong lần mở trang này chưa
+    checked: false,
   }),
   getters: {
     isAuthenticated: (s) => !!s.token && !!s.admin,
@@ -25,25 +13,28 @@ export const useAdminAuthStore = defineStore('adminAuth', {
   actions: {
     async login(email, password) {
       const { data } = await adminLogin({ email, password })
+      // Mỗi tab chỉ có một vai trò; không ảnh hưởng các tab khác.
+      clearUserToken()
       this.token = data.token
       this.admin = data.user
       this.checked = true
-      writeToken(data.token)
+      setAdminToken(data.token)
     },
 
-    // Khôi phục phiên khi tải lại trang: hỏi server token còn hợp lệ và còn là admin không
     async restore() {
       if (this.checked) return this.isAuthenticated
       if (!this.token) {
         this.checked = true
         return false
       }
+      const token = this.token
       try {
         const { data } = await adminMe()
+        if (this.token !== token) return this.isAuthenticated
         this.admin = data.user
       } catch (error) {
+        if (this.token !== token) return this.isAuthenticated
         const code = error?.response?.status
-        // Chỉ đăng xuất khi máy chủ nói token sai/hết hạn. Lỗi mạng/timeout thì giữ token, thử lại sau.
         if (code === 401 || code === 403 || code === 404) this.logout()
         else { this.checked = false; return false }
       }
@@ -55,19 +46,8 @@ export const useAdminAuthStore = defineStore('adminAuth', {
       this.token = ''
       this.admin = null
       this.checked = true
-      writeToken('')
+      setAdminToken('')
+      try { window.dispatchEvent(new Event('hqa-admin-logout')) } catch { /* không có window */ }
     },
   },
 })
-
-// Đồng bộ giữa các tab: đăng nhập/đăng xuất admin ở tab này thì tab khác tự cập nhật
-if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (event) => {
-    if (event.key !== ADMIN_TOKEN_KEY) return
-    const store = useAdminAuthStore()
-    store.token = event.newValue || ''
-    store.admin = null
-    store.checked = false
-    if (store.token) store.restore()
-  })
-}

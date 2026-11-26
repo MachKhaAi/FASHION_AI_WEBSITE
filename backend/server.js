@@ -9,6 +9,7 @@ const adminCatalogRoutes = require('./routes/adminCatalog');
 const orderRoutes = require('./routes/orders');
 const productRoutes = require('./routes/products');
 const cartRoutes = require('./routes/cart');
+const favoritesRoutes = require('./routes/favorites');
 const sizeAdvisorRoutes = require('./routes/sizeAdvisor');
 const sizeChatRoutes = require('./routes/sizeChat');
 
@@ -40,11 +41,15 @@ app.use('/api/auth', authRoutes);
 app.use('/api', authRoutes);
 // Giỏ hàng
 app.use('/api/cart', cartRoutes);
+// Sản phẩm yêu thích của khách hàng: /api/favorites
+app.use('/api/favorites', favoritesRoutes);
 
 // AI Size Advisor (tư vấn size dựa trên bảng size_charts): POST /api/size-advisor
 app.use('/api', sizeAdvisorRoutes);
 
-// Chat tư vấn size bằng tiếng Việt: POST /api/size-chat
+// Chatbot tư vấn size (Gemini trích xuất, thuật toán chọn size):
+//   POST /api/chat/message     tin nhắn của khách
+//   POST /api/advisor/manual   biểu mẫu nhập số đo thủ công (khi AI không dùng được)
 app.use('/api', sizeChatRoutes);
 
 // 1. API kiểm tra kết nối Database

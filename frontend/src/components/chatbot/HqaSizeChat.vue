@@ -1,7 +1,8 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useHqaChatStore } from '../../stores/hqaChat'
+import { useHqaShopStore } from '../../stores/hqaShop'
 import { money } from '../../data/hqaCatalog'
 
 const props = defineProps({
@@ -10,6 +11,7 @@ const props = defineProps({
 })
 
 const chat = useHqaChatStore()
+const shop = useHqaShopStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -25,9 +27,34 @@ const quickReplies = computed(() => {
   return m && m.role === 'bot' && !chat.loading ? m.quickReplies || [] : []
 })
 
-const CONFIDENCE_TEXT = { high: 'Khớp hoàn toàn', medium: 'Khá phù hợp', low: 'Chỉ để tham khảo' }
+const AVAILABILITY_TEXT = { in: 'Còn hàng', low: 'Sắp hết hàng', out: 'Hết hàng' }
+const FORM_FIELDS = [
+  { key: 'height', label: 'Chiều cao', unit: 'cm', min: 100, max: 230, step: 1 },
+  { key: 'weight', label: 'Cân nặng', unit: 'kg', min: 20, max: 250, step: 0.1 },
+  { key: 'chest', label: 'Vòng ngực', unit: 'cm', min: 50, max: 160, step: 1 },
+  { key: 'waist', label: 'Vòng eo', unit: 'cm', min: 40, max: 160, step: 1 },
+  { key: 'hip', label: 'Vòng hông', unit: 'cm', min: 50, max: 170, step: 1 },
+]
+const LABELS = Object.fromEntries(FORM_FIELDS.map((f) => [f.key, f.label.toLowerCase()]))
 
-onMounted(() => chat.hydrate())
+// Danh sách sản phẩm cho ô chọn trong biểu mẫu
+const productOptions = computed(() => {
+  const list = shop.products.map((p) => ({ id: p.id, name: p.name }))
+  // luôn có sản phẩm đang tư vấn trong danh sách, kể cả khi danh mục chưa tải xong
+  for (const m of chat.messages) {
+    for (const c of m.cards || []) {
+      const p = c.type === 'form' ? c.prefill?.product : null
+      if (p && !list.some((x) => x.id === p.id)) list.push({ id: p.id, name: p.name })
+    }
+  }
+  return list.sort((a, b) => a.name.localeCompare(b.name, 'vi'))
+})
+
+onMounted(() => {
+  chat.hydrate()
+  // Danh sách sản phẩm cho ô chọn trong biểu mẫu: nạp nếu store chưa có
+  if (!shop.products.length && typeof shop.fetchCatalog === 'function') shop.fetchCatalog().catch(() => {})
+})
 
 // Chuyển **đậm** và xuống dòng sang HTML. Đã thoát ký tự đặc biệt trước nên an toàn.
 function formatText(text = '') {
@@ -88,15 +115,52 @@ function onEscape() {
   if (!props.embedded) chat.close()
 }
 
-function stockText(stock) {
-  if (stock.status === 'in') return 'Còn hàng'
-  if (stock.status === 'low') return `Sắp hết (còn ${stock.quantity})`
-  return stock.suggestion ? `Hết hàng · gần nhất còn size ${stock.suggestion}` : 'Hết hàng'
+function mismatchText(i) {
+  return `${i.label.toLowerCase()} ${i.side === 'above' ? 'lớn hơn' : 'nhỏ hơn'} khoảng ${i.min}–${i.max} ${i.unit} (${i.diff} ${i.unit})`
+}
+const fromProfile = (c, key) => (c.fromProfile || []).includes(key)
+
+// ---------- Biểu mẫu nhập số đo thủ công ----------
+const forms = reactive({}) // theo id tin nhắn: { productId, values, errors, submitting }
+function makeForm(card) {
+  const pre = card.prefill || {}
+  return {
+    productId: pre.productId || '',
+    values: Object.fromEntries(FORM_FIELDS.map((f) => [f.key, pre.measurements?.[f.key] ?? ''])),
+    errors: {},
+    submitting: false,
+  }
+}
+// Tạo state cho mỗi biểu mẫu mới (không tạo trong lúc render)
+function ensureForms() {
+  for (const m of chat.messages) {
+    for (const c of m.cards || []) if (c.type === 'form' && !forms[m.id]) forms[m.id] = makeForm(c)
+  }
+}
+watch(() => chat.messages.length, ensureForms, { immediate: true, flush: 'sync' })
+const formFor = (m) => forms[m.id] || makeForm({})
+
+function validateForm(f) {
+  const errors = {}
+  if (!f.productId) errors.productId = 'Vui lòng chọn sản phẩm.'
+  for (const field of FORM_FIELDS) {
+    const raw = f.values[field.key]
+    if (raw === '' || raw === null || raw === undefined) continue // không bắt buộc 5 ô
+    const n = Number(raw)
+    if (!Number.isFinite(n) || n < field.min || n > field.max) errors[field.key] = `Phải từ ${field.min} đến ${field.max} ${field.unit}.`
+  }
+  return errors
 }
 
-function statusText(d) {
-  if (d.status === 'ok') return '✓ Vừa'
-  return d.status === 'above' ? `Lớn hơn ${d.diff} ${d.unit}` : `Nhỏ hơn ${d.diff} ${d.unit}`
+async function submitForm(m, card) {
+  const f = formFor(m)
+  f.errors = validateForm(f)
+  if (Object.keys(f.errors).length) return
+  f.submitting = true
+  const measurements = Object.fromEntries(FORM_FIELDS.filter((x) => f.values[x.key] !== '' && f.values[x.key] != null).map((x) => [x.key, Number(f.values[x.key])]))
+  const result = await chat.submitForm(m.id, { productId: f.productId, measurements })
+  f.submitting = false
+  if (!result.ok) f.errors = result.errors || {}
 }
 
 async function onAction(action) {
@@ -108,13 +172,15 @@ async function onAction(action) {
   if (!props.embedded && window.matchMedia('(max-width: 640px)').matches) chat.close()
 }
 
+const quickLabel = (q) => (typeof q === 'object' ? q.label : q)
+
 function pickProduct(p) {
   submit(`Mình muốn mua ${p.name}`)
 }
 
 function hasUnderstood(m) {
   const e = m.extracted
-  return !!e && (e.measurements?.length || e.product || e.preference || e.size || e.color)
+  return !!e && (e.measurements?.length || e.product || e.size || e.color || e.fromProfile?.length)
 }
 function understoodChips(m) {
   const e = m.extracted
@@ -122,7 +188,7 @@ function understoodChips(m) {
   if (e.product) chips.push(`Sản phẩm: ${e.product.name}`)
   if (e.size) chips.push(`Size hỏi: ${e.size}`)
   if (e.color) chips.push(`Màu: ${e.color}`)
-  if (e.preference) chips.push(e.preference === 'loose' ? 'Thích mặc rộng' : 'Thích mặc ôm')
+  if (e.fromProfile?.length) chips.push('Số đo từ hồ sơ cá nhân')
   return chips
 }
 </script>
@@ -155,6 +221,7 @@ function understoodChips(m) {
           </div>
 
           <div class="chat-bubble" :class="{ error: m.error }" v-html="formatText(m.text)"></div>
+          <p v-if="m.techNote" class="chat-tech" role="note">⚙ Chi tiết kỹ thuật (chỉ hiện khi phát triển): {{ m.techNote }}</p>
 
           <template v-for="(c, i) in m.cards || []" :key="i">
             <!-- Một sản phẩm -->
@@ -180,37 +247,81 @@ function understoodChips(m) {
             </div>
 
             <!-- Kết quả tư vấn -->
-            <div v-else-if="c.type === 'advice'" class="chat-advice">
+            <div v-else-if="c.type === 'advice' && c.status === 'OK'" class="chat-advice">
+              <div v-if="c.product" class="adv-product"><img :src="c.product.image" :alt="c.product.name" loading="lazy" /><span>{{ c.product.name }}</span></div>
               <div class="adv-top">
                 <div>
-                  <small>Size gợi ý</small>
+                  <small>Size đề xuất</small>
                   <b class="adv-size">{{ c.size }}</b>
                 </div>
                 <div class="adv-tags">
-                  <span class="adv-badge" :class="`is-${c.confidence}`">{{ CONFIDENCE_TEXT[c.confidence] }}</span>
-                  <span v-if="c.stock" class="adv-stock" :class="`is-${c.stock.status}`">{{ stockText(c.stock) }}</span>
+                  <span class="adv-badge" :class="c.complete ? 'is-high' : ''">{{ c.complete ? 'Khớp đủ 5 số đo' : 'Khớp các số đo đã cung cấp' }}</span>
+                  <span v-if="c.availability && AVAILABILITY_TEXT[c.availability.status]" class="adv-stock" :class="`is-${c.availability.status}`">{{ AVAILABILITY_TEXT[c.availability.status] }}</span>
                 </div>
               </div>
               <div class="adv-table-wrap">
                 <table class="adv-table">
                   <thead>
-                    <tr><th scope="col">Số đo</th><th scope="col">Của bạn</th><th scope="col">Size {{ c.size }}</th><th scope="col">Đánh giá</th></tr>
+                    <tr><th scope="col">Số đo</th><th scope="col">Của bạn</th><th scope="col">Size {{ c.size }}</th><th scope="col">Kết quả</th></tr>
                   </thead>
                   <tbody>
-                    <tr v-for="d in c.details" :key="d.key">
-                      <th scope="row">{{ d.label }}</th>
-                      <td>{{ d.value }} {{ d.unit }}</td>
-                      <td>{{ d.min }}–{{ d.max }}</td>
-                      <td :class="d.status === 'ok' ? 'ok' : 'off'">{{ statusText(d) }}</td>
+                    <tr v-for="e in c.evidence" :key="e.key">
+                      <th scope="row">{{ e.label }}<small v-if="fromProfile(c, e.key)" class="adv-src"> · hồ sơ</small></th>
+                      <td>{{ e.value }} {{ e.unit }}</td>
+                      <td>{{ e.min }}–{{ e.max }}</td>
+                      <td class="ok">✓ Vừa</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-              <p v-if="c.alternatives?.length" class="adv-alt">Các size gần nhất khác: {{ c.alternatives.map((a) => a.size).join(', ') }}</p>
+              <p v-if="!c.complete" class="adv-alt">Gợi ý chỉ dựa trên số đo hiện có; chưa xác nhận được các số đo còn thiếu.</p>
+              <p v-if="c.chosenBy === 'larger'" class="adv-alt">Số đo của bạn cùng nằm trong các size {{ c.matched.join(', ') }}, ưu tiên size lớn hơn để thoải mái.</p>
+              <p v-if="c.availability?.status === 'out'" class="adv-alt">Size này đang hết hàng. Mình không tự đổi sang size khác vì có thể không vừa.</p>
               <div v-if="c.actions?.length" class="adv-actions">
                 <button v-for="a in c.actions" :key="a.label" type="button" class="chat-primary" @click="onAction(a)">{{ a.label }}</button>
               </div>
             </div>
+
+            <!-- Nhiều size cùng phù hợp với số đo hiện tại: không tự chốt size. -->
+            <div v-else-if="c.type === 'advice' && c.status === 'AMBIGUOUS'" class="chat-advice">
+              <strong class="chart-title">Cần thêm thông tin để chọn chính xác</strong>
+              <p>Các size còn phù hợp theo bảng size shop: <strong>{{ c.candidates.join(', ') }}</strong>.</p>
+              <p class="adv-alt">Bạn có thể cung cấp thêm số đo; trợ lý sẽ không chọn ngẫu nhiên.</p>
+            </div>
+
+            <!-- Chưa có size thỏa các số đo đã cung cấp -->
+            <div v-else-if="c.type === 'advice' && c.status === 'NO_MATCH'" class="chat-advice">
+              <div v-if="c.product" class="adv-product"><img :src="c.product.image" :alt="c.product.name" loading="lazy" /><span>{{ c.product.name }}</span></div>
+              <div class="adv-top">
+                <div><small>Kết quả</small><b class="adv-size none">Chưa tìm được size phù hợp với số đo của bạn</b></div>
+              </div>
+              <ul class="adv-mismatch">
+                <li v-for="m in c.mismatches" :key="m.size"><strong>Size {{ m.size }}:</strong> {{ m.issues.map(mismatchText).join('; ') }}</li>
+              </ul>
+              <p class="adv-alt">Bạn có thể liên hệ chăm sóc khách hàng của HQA hoặc xem sản phẩm khác.</p>
+            </div>
+
+            <!-- Biểu mẫu nhập số đo thủ công -->
+            <form v-else-if="c.type === 'form'" class="chat-form" novalidate @submit.prevent="submitForm(m, c)">
+              <label class="cf-row">
+                <span>Sản phẩm</span>
+                <select v-model="formFor(m).productId" :disabled="m.formDone || formFor(m).submitting" :aria-invalid="!!formFor(m).errors.productId">
+                  <option value="">— Chọn sản phẩm —</option>
+                  <option v-for="p in productOptions" :key="p.id" :value="p.id">{{ p.name }}</option>
+                </select>
+                <em v-if="formFor(m).errors.productId" class="cf-error" role="alert">{{ formFor(m).errors.productId }}</em>
+              </label>
+              <div class="cf-grid">
+                <label v-for="f in FORM_FIELDS" :key="f.key" class="cf-row">
+                  <span>{{ f.label }} ({{ f.unit }})</span>
+                  <input v-model="formFor(m).values[f.key]" type="number" inputmode="decimal" :min="f.min" :max="f.max" :step="f.step" :disabled="m.formDone || formFor(m).submitting" :aria-invalid="!!formFor(m).errors[f.key]" />
+                  <em v-if="formFor(m).errors[f.key]" class="cf-error" role="alert">{{ formFor(m).errors[f.key] }}</em>
+                </label>
+              </div>
+              <em v-if="formFor(m).errors._form" class="cf-error" role="alert">{{ formFor(m).errors._form }}</em>
+              <button type="submit" class="chat-primary" :disabled="m.formDone || formFor(m).submitting">{{ m.formDone ? 'Đã gửi' : formFor(m).submitting ? 'Đang tư vấn...' : 'Tư vấn size' }}</button>
+              <small class="cf-note">Chỉ điền những số đo bạn có, các ô khác được để trống. Hệ thống có thể bổ sung số đo đã lưu trong hồ sơ khách hàng. Thông tin nhập tại đây không tự lưu vào hồ sơ.</small>
+            </form>
 
             <!-- Bảng size -->
             <div v-else-if="c.type === 'chart'" class="chat-advice">
@@ -258,7 +369,7 @@ function understoodChips(m) {
     </div>
 
     <div v-if="quickReplies.length" class="chat-quick" aria-label="Gợi ý trả lời nhanh">
-      <button v-for="q in quickReplies" :key="q" type="button" @click="submit(q)">{{ q }}</button>
+      <button v-for="q in quickReplies" :key="quickLabel(q)" type="button" @click="chat.sendQuick(q)">{{ quickLabel(q) }}</button>
     </div>
 
     <form class="chat-input" @submit.prevent="submit()">
@@ -267,7 +378,7 @@ function understoodChips(m) {
         v-model="draft"
         rows="1"
         maxlength="500"
-        placeholder="Ví dụ: cao 1m60, nặng 50kg, đầm maxi"
+        placeholder="Nhập tin nhắn của bạn..."
         aria-label="Nhập tin nhắn"
         @input="autoGrow"
         @keydown="onKeydown"
@@ -398,6 +509,7 @@ function understoodChips(m) {
   color: #fff;
   border-top-right-radius: 5px;
 }
+.chat-tech { margin: 0; padding: 7px 10px; border-radius: 10px; background: #f3f0ff; border: 1px dashed #c9bfef; color: #5b4b9a; font-size: 11.5px; line-height: 1.45; word-break: break-word; }
 .chat-bubble.error { background: #fff4f2; border-color: #f3c9c2; color: #9a4a3d; }
 .chat-bubble :deep(strong) { font-weight: 650; }
 
@@ -495,6 +607,37 @@ function understoodChips(m) {
 }
 .chat-primary:hover { background: #944a62; }
 .chat-retry { align-self: flex-start; padding: 5px 14px; border: 1px solid var(--rose); border-radius: 999px; background: #fff; color: var(--rose); font: inherit; font-size: 12.5px; cursor: pointer; }
+
+
+/* ---------- Thẻ sản phẩm trong kết quả, biểu mẫu ---------- */
+.adv-product { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 12.5px; color: #8a6a74; }
+.adv-product img { width: 28px; height: 35px; object-fit: cover; border-radius: 5px; background: var(--rose-soft); }
+.adv-size.none { font-size: 18px; line-height: 1.3; color: #a8651a; font-family: inherit; }
+.adv-src { color: #9a8088; font-weight: 400; }
+.adv-mismatch { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; line-height: 1.45; }
+.adv-mismatch li { padding: 7px 9px; background: #fdf6ee; border-radius: 9px; color: #7a5a35; }
+
+.chat-form { background: #fff; border: 1px solid var(--rose-line); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.cf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
+.cf-row { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #8a6a74; }
+.cf-row span { font-weight: 600; }
+.cf-row input, .cf-row select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #e6d3d8;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ink);
+  background: #fffafa;
+}
+.cf-row input:focus, .cf-row select:focus { outline: 2px solid #e8b4c2; border-color: var(--rose); }
+.cf-row input[aria-invalid='true'], .cf-row select[aria-invalid='true'] { border-color: #d98a7f; background: #fff7f5; }
+.cf-row input:disabled, .cf-row select:disabled { opacity: 0.7; }
+.cf-error { font-style: normal; font-size: 11.5px; color: #b0463a; }
+.cf-note { font-size: 11px; color: #a2929a; text-align: center; }
+.chat-primary:disabled { background: #dcc4cb; cursor: not-allowed; }
 
 /* ---------- Gợi ý nhanh + ô nhập ---------- */
 .chat-quick { display: flex; flex-wrap: wrap; gap: 7px; padding: 8px 14px 4px; background: #fcf7f6; }

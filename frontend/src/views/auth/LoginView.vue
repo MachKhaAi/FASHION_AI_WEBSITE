@@ -14,10 +14,16 @@ const admin = useAdminAuthStore()
 const form = ref({ email: '', password: '' })
 const error = ref('')
 const loading = ref(false)
+const showPassword = ref(false)
 
-function safeRedirect(fallback) {
+function safeRedirect(fallback, forAdmin = false) {
   const r = route.query.redirect
-  return typeof r === 'string' && r.startsWith('/') && !r.startsWith('//') ? r : fallback
+  // Chỉ quay về route nội bộ hợp lệ, không quay về trang đăng nhập/đăng ký.
+  if (typeof r !== 'string' || !r.startsWith('/') || r.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(r)) return fallback
+  const target = router.resolve(r)
+  if (!target.matched.length || ['login', 'register', 'admin-login'].includes(target.name)) return fallback
+  const isAdminRoute = target.matched.some(record => record.meta.requiresAdmin)
+  return isAdminRoute === forAdmin ? target.fullPath : fallback
 }
 
 async function submit() {
@@ -44,10 +50,11 @@ async function submit() {
 
     if (user.role === 'admin') {
       await admin.login(email, form.value.password)
-      await router.push(safeRedirect('/admin'))
+      await router.replace(safeRedirect('/admin', true))
       return
     }
 
+    admin.logout() // đăng nhập khách trong tab này không được giữ quyền admin cũ
     shop.setViewer({
       name: user.full_name,
       email: user.email,
@@ -57,7 +64,7 @@ async function submit() {
     // Tải giỏ hàng từ cơ sở dữ liệu ngay khi đăng nhập thành công
     await shop.fetchCart()
 
-    await router.push(safeRedirect('/thong-tin-ca-nhan'))
+    await router.replace(safeRedirect('/'))
   } catch (err) {
     error.value = err.response?.data?.message || err.message || 'Không thể kết nối máy chủ.'
   } finally {
@@ -86,7 +93,10 @@ async function submit() {
         </div>
         <div class="hqa-form-field">
           <label for="login-password">Mật khẩu</label>
-          <input id="login-password" v-model="form.password" type="password" required autocomplete="current-password" placeholder="Nhập mật khẩu" />
+          <div class="hqa-password-control">
+            <input id="login-password" v-model="form.password" :type="showPassword ? 'text' : 'password'" required autocomplete="current-password" placeholder="Nhập mật khẩu" />
+            <button type="button" :aria-label="showPassword ? 'Ẩn mật khẩu' : 'Xem mật khẩu'" :aria-pressed="showPassword" @click="showPassword = !showPassword">{{ showPassword ? 'Ẩn' : 'Hiện' }}</button>
+          </div>
         </div>
         <div v-if="error" class="hqa-alert" role="alert">{{ error }}</div>
         <button class="hqa-primary" type="submit" :disabled="loading">{{ loading ? 'Đang đăng nhập...' : 'Đăng nhập →' }}</button>

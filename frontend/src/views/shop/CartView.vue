@@ -25,6 +25,7 @@ onMounted(() => {
     <div class="hqa-eyebrow">YOUR SHOPPING BAG</div>
     <h1 class="hqa-page-title">Giỏ hàng của bạn ({{ shop.cartCount }})</h1>
     
+    <div v-if="shop.cartError" class="hqa-alert" role="alert">{{ shop.cartError }} <button type="button" :disabled="shop.cartBusy || shop.cartLoading" @click="shop.loadCart()">Thử lại</button></div>
     <div v-if="shop.cartLoading" class="hqa-empty" style="margin-top:25px">
       <p class="hqa-dim">Đang tải giỏ hàng...</p>
     </div>
@@ -39,13 +40,13 @@ onMounted(() => {
               <span v-if="line.isAiRecommended" style="display:inline-block;margin-left:6px;padding:2px 8px;border-radius:99px;background:#fdf2f8;color:#be185d;font-size:12px">✧ AI tư vấn size</span>
             </p>
             <p class="hqa-price">{{ money(line.product.price) }}</p>
-            <button type="button" class="hqa-link-button" @click="shop.removeFromCart(line.key)">Xóa sản phẩm</button>
+            <button type="button" class="hqa-link-button" :disabled="shop.cartBusy" @click="shop.removeFromCart(line.key)">Xóa sản phẩm</button>
           </div>
           <div class="hqa-cart-row-side">
             <div class="hqa-qty">
-              <button type="button" :disabled="line.qty <= 1" @click="shop.updateQuantity(line.key, line.qty - 1)">−</button>
+              <button type="button" :disabled="shop.cartBusy || line.qty <= 1" @click="shop.updateQuantity(line.key, line.qty - 1)">−</button>
               <span>{{ line.qty }}</span>
-              <button type="button" :disabled="line.qty >= (line.stock || line.product.stock)" @click="shop.updateQuantity(line.key, line.qty + 1)">+</button>
+              <button type="button" :disabled="shop.cartBusy || line.qty >= line.stock" @click="shop.updateQuantity(line.key, line.qty + 1)">+</button>
             </div>
             <strong>{{ money(line.product.price * line.qty) }}</strong>
           </div>
@@ -63,7 +64,7 @@ onMounted(() => {
       </aside>
     </div>
     
-    <div v-else class="hqa-empty" style="margin-top:25px">
+    <div v-else-if="!shop.cartError" class="hqa-empty" style="margin-top:25px">
       <div class="hqa-empty-icon">♡</div>
       <h2>Giỏ hàng của bạn đang trống</h2>
       <p class="hqa-dim">Hãy chọn những món đồ xinh xắn cho riêng mình.</p>

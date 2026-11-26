@@ -1,6 +1,7 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
+const { verifyAuthToken } = require('../utils/authTokens');
 const db = require('../config/db');
+const advisor = require('../utils/sizeAdvisor');
 
 const router = express.Router();
 
@@ -16,7 +17,7 @@ function optionalUserId(req) {
   const header = req.headers.authorization || '';
   if (!header.startsWith('Bearer ')) return null;
   try {
-    return jwt.verify(header.slice(7), process.env.JWT_SECRET).id;
+    return verifyAuthToken(header.slice(7)).id;
   } catch {
     return null;
   }
@@ -52,7 +53,7 @@ router.post('/size-advisor', async (req, res) => {
   try {
     // ---- 2. Điền số đo còn thiếu từ hồ sơ đã lưu (nếu đã đăng nhập) ----
     let usedSaved = false;
-    const userId = body.use_saved_measurements === true ? optionalUserId(req) : null;
+    const userId = body.use_saved_measurements === false ? null : optionalUserId(req);
     if (userId) {
       const saved = await db.query(
         'SELECT height, weight, chest, waist, hip FROM body_measurements WHERE user_id = $1',
@@ -61,7 +62,7 @@ router.post('/size-advisor', async (req, res) => {
       const row = saved.rows[0];
       if (row) {
         for (const f of FIELDS) {
-          if (input[f.key] === undefined && row[f.key] !== null && row[f.key] !== undefined) {
+          if (input[f.key] === undefined && row[f.key] !== null && row[f.key] !== undefined && Number.isFinite(Number(row[f.key])) && Number(row[f.key]) >= f.min && Number(row[f.key]) <= f.max) {
             input[f.key] = Number(row[f.key]);
             usedSaved = true;
           }
@@ -93,59 +94,26 @@ router.post('/size-advisor', async (req, res) => {
       });
     }
 
-    // ---- 4. Chấm điểm từng size: tổng (trọng số x độ lệch), càng thấp càng vừa ----
-    const scored = chart.rows.map((row, rank) => {
-      let score = 0;
-      for (const f of FIELDS) {
-        if (input[f.key] === undefined) continue;
-        score += f.weight * distance(input[f.key], row[`${f.key}_min`], row[`${f.key}_max`]);
-      }
-      return { row, rank, score };
-    });
-    scored.sort((a, b) => a.score - b.score || b.rank - a.rank);
-
-    const best = scored[0];
-    const confidence = best.score === 0 ? 'high' : best.score <= 6 ? 'medium' : 'low';
-
-    // ---- 5. Chi tiết từng số đo so với size được chọn ----
-    const details = [];
-    for (const f of FIELDS) {
-      if (input[f.key] === undefined) continue;
-      const lo = best.row[`${f.key}_min`];
-      const hi = best.row[`${f.key}_max`];
-      const value = input[f.key];
-      const status = value < lo ? 'below' : value > hi ? 'above' : 'ok';
-      details.push({
-        key: f.key,
-        label: f.label,
-        unit: f.unit,
-        value,
-        min: lo,
-        max: hi,
-        status,
-        diff: distance(value, lo, hi),
-      });
+    // Chỉ xét các size khớp TẤT CẢ số đo hiện có. Không tính khoảng cách/gần đúng.
+    const rows = chart.rows.map((r) => ({
+      size: r.size_code,
+      ranges: Object.fromEntries(FIELDS.map((f) => [f.key, [r[`${f.key}_min`], r[`${f.key}_max`]]])),
+    }));
+    const sizes = rows.map((r) => r.size);
+    const result = advisor.recommend({ measurements: input, product: { sizes }, chart: rows });
+    const base = { success: true, recommended_size: null, used_saved_measurements: usedSaved };
+    if (result.status === 'AMBIGUOUS') {
+      return res.json({ ...base, status: result.status, candidates: result.candidates,
+        message: `Các size ${result.candidates.join(', ')} đều khớp số đo đang có. Vui lòng bổ sung số đo để phân biệt; shop không tự chọn size.` });
     }
-
-    let message;
-    if (best.score === 0) {
-      message = `Số đo của bạn khớp hoàn toàn với size ${best.row.size_code}.`;
-    } else {
-      const notes = details
-        .filter((d) => d.status !== 'ok')
-        .map((d) => `${d.label.toLowerCase()} ${d.status === 'above' ? 'lớn hơn' : 'nhỏ hơn'} khoảng ${d.diff} ${d.unit}`);
-      message = `Size ${best.row.size_code} là gần nhất với số đo của bạn (${notes.join(', ')} so với khoảng chuẩn).`;
+    if (result.status !== 'OK') {
+      return res.json({ ...base, status: result.status,
+        message: result.status === 'NO_MATCH' ? 'Không có size nào khớp tất cả số đo bạn cung cấp theo bảng size của shop.' : 'Chưa đủ dữ liệu bảng size để đưa ra gợi ý; shop không tự suy đoán.' });
     }
-
-    res.json({
-      success: true,
-      recommended_size: best.row.size_code,
-      confidence, // high | medium | low
-      message,
-      details,
-      alternatives: scored.slice(1, 3).map((s) => ({ size: s.row.size_code, score: s.score })),
-      used_saved_measurements: usedSaved,
-    });
+    const details = result.evidence.map((e) => ({ ...e, status: 'ok', diff: 0 }));
+    return res.json({ ...base, status: 'OK', recommended_size: result.size, confidence: result.complete ? 'high' : 'partial',
+      message: result.complete ? `Các số đo bạn cung cấp khớp size ${result.size} theo bảng size shop.` : `Size ${result.size} khớp các số đo hiện có theo bảng size shop. Bạn có thể bổ sung số đo để kiểm tra kỹ hơn.`,
+      details, alternatives: [], complete: result.complete });
   } catch (error) {
     console.error('Lỗi tính size AI:', error);
     res.status(500).json({ success: false, message: 'Lỗi server khi tính toán size' });
